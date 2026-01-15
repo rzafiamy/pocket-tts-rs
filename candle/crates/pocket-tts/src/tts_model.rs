@@ -365,11 +365,11 @@ impl TTSModel {
     /// Generate audio stream from text with voice state
     ///
     /// Returns an iterator that yields audio chunks (one per Mimi frame).
-    pub fn generate_stream<'a>(
+    pub fn generate_stream<'a, 'b, 'c>(
         &'a self,
-        text: &str,
-        voice_state: &ModelState,
-    ) -> impl Iterator<Item = Result<Tensor>> + 'a {
+        text: &'b str,
+        voice_state: &'c ModelState,
+    ) -> Box<dyn Iterator<Item = Result<Tensor>> + 'a> {
         let mut state = voice_state.clone();
         let mut mimi_state = init_states(1, 1000);
 
@@ -405,7 +405,7 @@ impl TTSModel {
         let mut eos_step: Option<usize> = None;
         let mut finished = false;
 
-        (0..max_gen_len).map_while(move |step| {
+        Box::new((0..max_gen_len).map_while(move |step| {
             if finished {
                 return None;
             }
@@ -461,7 +461,45 @@ impl TTSModel {
             increment_steps(&mut state, "offset", 1);
 
             Some(Ok(audio_frame))
+        }))
+    }
+
+    /// Generate audio stream from long text by segmenting it
+    pub fn generate_stream_long<'a>(
+        &'a self,
+        text: &str,
+        voice_state: &'a ModelState,
+    ) -> impl Iterator<Item = Result<Tensor>> + 'a {
+        // Simple segmentation by sentence endings
+        // This is a basic implementation; robust NLP segmentation would be better but requires more dependencies
+        let segments: Vec<String> = text
+            .split_inclusive(&['.', '!', '?'])
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        // If no punctuation found, treat entire text as one segment
+        let segments = if segments.is_empty() && !text.trim().is_empty() {
+            vec![text.trim().to_string()]
+        } else {
+            segments
+        };
+
+        let model = self; // Capture self
+        // We capture the reference 'voice_state'. It lives as long as 'a.
+        // The closure moves it in, but it's a reference, so it's copied.
+        // We do NOT need to clone the object itself here.
+
+        segments.into_iter().flat_map(move |segment| {
+            // Re-clone the initial voice state for each segment to reset FlowLM context
+            // This ensures we don't hit position embedding limits and keeps segments clean.
+            // Concatenation of audio should be seamless enough if segments are well-formed.
+            model.generate_stream(&segment, voice_state)
         })
+    }
+    pub fn estimate_generation_steps(&self, text: &str) -> usize {
+        let prepared = prepare_text_prompt(text);
+        (prepared.split_whitespace().count() + 2) * 13
     }
 }
 

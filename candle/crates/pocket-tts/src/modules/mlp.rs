@@ -1,7 +1,7 @@
 use candle_core::{DType, Result, Tensor};
 use candle_nn::{Linear, Module, VarBuilder};
 
-pub type StepFn = Box<dyn Fn(&Tensor) -> Result<Tensor>>;
+pub type StepFn = Box<dyn Fn(&Tensor) -> Result<Tensor> + Send + Sync>;
 
 pub struct RMSNorm {
     alpha: Tensor,

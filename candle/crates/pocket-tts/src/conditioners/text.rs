@@ -16,10 +16,9 @@ impl LUTConditioner {
         _output_dim: usize,
         vb: VarBuilder,
     ) -> Result<Self> {
-        let sp = SentencePieceProcessor::open(tokenizer_path).map_err(|e| {
-            candle_core::Error::Msg(format!("Failed to load tokenizer: {:?}", e))
-        })?;
-        
+        let sp = SentencePieceProcessor::open(tokenizer_path)
+            .map_err(|e| candle_core::Error::Msg(format!("Failed to load tokenizer: {:?}", e)))?;
+
         // Verify vocab size matches
         let vocab_size = sp.len();
         if vocab_size != n_bins {
@@ -28,7 +27,7 @@ impl LUTConditioner {
                 vocab_size, n_bins
             )));
         }
-        
+
         // n_bins + 1 for padding
         let embed = candle_nn::embedding(n_bins + 1, dim, vb.pp("embed"))?;
 
@@ -36,11 +35,12 @@ impl LUTConditioner {
     }
 
     pub fn prepare(&self, text: &str, device: &candle_core::Device) -> Result<Tensor> {
-        let pieces = self.sp.encode(text).map_err(|e| {
-            candle_core::Error::Msg(format!("Failed to encode text: {:?}", e))
-        })?;
-        
-        let ids: Vec<u32> = pieces.iter().map(|p| p.id as u32).collect();
+        let pieces = self
+            .sp
+            .encode(text)
+            .map_err(|e| candle_core::Error::Msg(format!("Failed to encode text: {:?}", e)))?;
+
+        let ids: Vec<u32> = pieces.iter().map(|p| p.id).collect();
         Tensor::from_vec(ids.clone(), (1, ids.len()), device)
     }
 

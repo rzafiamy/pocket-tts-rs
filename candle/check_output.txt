@@ -1,0 +1,406 @@
+    Checking pocket-tts-cli v0.1.0 (D:\pocket-tts-candle\candle\crates\pocket-tts-cli)
+warning: unused import: `pocket_tts::audio`
+  --> crates\pocket-tts-cli\src\server\handlers.rs:10:5
+   |
+10 | use pocket_tts::audio;
+   |     ^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+error[E0277]: `dyn Fn(&Tensor) -> Result<Tensor, Error>` cannot be shared between threads safely
+   --> crates\pocket-tts-cli\src\server\handlers.rs:41:46
+    |
+ 41 |       let result = tokio::task::spawn_blocking(move || {
+    |  __________________---------------------------_^
+    | |                  |
+    | |                  required by a bound introduced by this call
+ 42 | |         // Resolve voice state
+ 43 | |         // TODO: Refactor this shared logic with commands/generate.rs
+ 44 | |         let voice_state = if let Some(ref v) = voice {
+...   |
+ 88 | |         Ok::<Vec<u8>, String>(buffer.into_inner())
+ 89 | |     }).await;
+    | |_____^ `dyn Fn(&Tensor) -> Result<Tensor, Error>` cannot be shared between threads safely
+    |
+    = help: the trait `Sync` is not implemented for `dyn Fn(&Tensor) -> Result<Tensor, Error>`
+    = note: required for `Unique<dyn Fn(&Tensor) -> Result<Tensor, Error>>` to implement `Sync`
+note: required because it appears within the type `Box<dyn Fn(&Tensor) -> Result<Tensor, Error>>`
+   --> C:\Users\Steve Business\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\alloc\src\boxed.rs:231:12
+    |
+231 | pub struct Box<
+    |            ^^^
+note: required because it appears within the type `PhantomData<Box<dyn Fn(&Tensor) -> Result<Tensor, Error>>>`
+   --> C:\Users\Steve Business\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\core\src\marker.rs:822:12
+    |
+822 | pub struct PhantomData<T: PointeeSized>;
+    |            ^^^^^^^^^^^
+note: required because it appears within the type `RawVec<Box<dyn Fn(&Tensor) -> Result<Tensor, Error>>>`
+   --> C:\Users\Steve Business\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\alloc\src\raw_vec\mod.rs:74:19
+    |
+ 74 | pub(crate) struct RawVec<T, A: Allocator = Global> {
+    |                   ^^^^^^
+note: required because it appears within the type `Vec<Box<dyn Fn(&Tensor) -> Result<Tensor, Error>>>`
+   --> C:\Users\Steve Business\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\alloc\src\vec\mod.rs:434:12
+    |
+434 | pub struct Vec<T, #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator = Global> {
+    |            ^^^
+note: required because it appears within the type `TimestepEmbedder`
+   --> D:\pocket-tts-candle\candle\crates\pocket-tts\src\modules\mlp.rs:81:12
+    |
+ 81 | pub struct TimestepEmbedder {
+    |            ^^^^^^^^^^^^^^^^
+note: required because it appears within the type `PhantomData<TimestepEmbedder>`
+   --> C:\Users\Steve Business\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\core\src\marker.rs:822:12
+    |
+822 | pub struct PhantomData<T: PointeeSized>;
+    |            ^^^^^^^^^^^
+note: required because it appears within the type `alloc::raw_vec::RawVec<TimestepEmbedder>`
+   --> C:\Users\Steve Business\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\alloc\src\raw_vec\mod.rs:74:19
+    |
+ 74 | pub(crate) struct RawVec<T, A: Allocator = Global> {
+    |                   ^^^^^^
+note: required because it appears within the type `Vec<TimestepEmbedder>`
+   --> C:\Users\Steve Business\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\alloc\src\vec\mod.rs:434:12
+    |
+434 | pub struct Vec<T, #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator = Global> {
+    |            ^^^
+note: required because it appears within the type `SimpleMLPAdaLN`
+   --> D:\pocket-tts-candle\candle\crates\pocket-tts\src\modules\mlp.rs:204:12
+    |
+204 | pub struct SimpleMLPAdaLN {
+    |            ^^^^^^^^^^^^^^
+note: required because it appears within the type `FlowLMModel`
+   --> D:\pocket-tts-candle\candle\crates\pocket-tts\src\models\flow_lm.rs:35:12
+    |
+ 35 | pub struct FlowLMModel {
+    |            ^^^^^^^^^^^
+note: required because it appears within the type `TTSModel`
+   --> D:\pocket-tts-candle\candle\crates\pocket-tts\src\tts_model.rs:25:12
+    |
+ 25 | pub struct TTSModel {
+    |            ^^^^^^^^
+    = note: required for `Arc<TTSModel>` to implement `Send`
+note: required because it's used within this closure
+   --> crates\pocket-tts-cli\src\server\handlers.rs:41:46
+    |
+ 41 |     let result = tokio::task::spawn_blocking(move || {
+    |                                              ^^^^^^^
+note: required by a bound in `spawn_blocking`
+   --> C:\Users\Steve Business\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.49.0\src\task\blocking.rs:207:28
+    |
+205 |     pub fn spawn_blocking<F, R>(f: F) -> JoinHandle<R>
+    |            -------------- required by a bound in this function
+206 |     where
+207 |         F: FnOnce() -> R + Send + 'static,
+    |                            ^^^^ required by this bound in `spawn_blocking`
+    = note: the full name for the type has been written to 'D:\pocket-tts-candle\candle\target\debug\deps\pocket_tts_cli-7180fc6c22c1041d.long-type-5580944524954153857.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+help: use parentheses to call this trait object
+    |
+ 89 |     }(/* &candle_core::tensor::Tensor */)).await;
+    |      ++++++++++++++++++++++++++++++++++++
+
+error[E0277]: `dyn Fn(&Tensor) -> Result<Tensor, Error>` cannot be sent between threads safely
+   --> crates\pocket-tts-cli\src\server\handlers.rs:41:46
+    |
+ 41 |       let result = tokio::task::spawn_blocking(move || {
+    |  __________________---------------------------_^
+    | |                  |
+    | |                  required by a bound introduced by this call
+ 42 | |         // Resolve voice state
+ 43 | |         // TODO: Refactor this shared logic with commands/generate.rs
+ 44 | |         let voice_state = if let Some(ref v) = voice {
+...   |
+ 88 | |         Ok::<Vec<u8>, String>(buffer.into_inner())
+ 89 | |     }).await;
+    | |_____^ `dyn Fn(&Tensor) -> Result<Tensor, Error>` cannot be sent between threads safely
+    |
+    = help: the trait `Send` is not implemented for `dyn Fn(&Tensor) -> Result<Tensor, Error>`
+    = note: required for `Unique<dyn Fn(&Tensor) -> Result<Tensor, Error>>` to implement `Send`
+note: required because it appears within the type `Box<dyn Fn(&Tensor) -> Result<Tensor, Error>>`
+   --> C:\Users\Steve Business\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\alloc\src\boxed.rs:231:12
+    |
+231 | pub struct Box<
+    |            ^^^
+note: required because it appears within the type `PhantomData<Box<dyn Fn(&Tensor) -> Result<Tensor, Error>>>`
+   --> C:\Users\Steve Business\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\core\src\marker.rs:822:12
+    |
+822 | pub struct PhantomData<T: PointeeSized>;
+    |            ^^^^^^^^^^^
+note: required because it appears within the type `RawVec<Box<dyn Fn(&Tensor) -> Result<Tensor, Error>>>`
+   --> C:\Users\Steve Business\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\alloc\src\raw_vec\mod.rs:74:19
+    |
+ 74 | pub(crate) struct RawVec<T, A: Allocator = Global> {
+    |                   ^^^^^^
+note: required because it appears within the type `Vec<Box<dyn Fn(&Tensor) -> Result<Tensor, Error>>>`
+   --> C:\Users\Steve Business\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\alloc\src\vec\mod.rs:434:12
+    |
+434 | pub struct Vec<T, #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator = Global> {
+    |            ^^^
+note: required because it appears within the type `TimestepEmbedder`
+   --> D:\pocket-tts-candle\candle\crates\pocket-tts\src\modules\mlp.rs:81:12
+    |
+ 81 | pub struct TimestepEmbedder {
+    |            ^^^^^^^^^^^^^^^^
+note: required because it appears within the type `PhantomData<TimestepEmbedder>`
+   --> C:\Users\Steve Business\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\core\src\marker.rs:822:12
+    |
+822 | pub struct PhantomData<T: PointeeSized>;
+    |            ^^^^^^^^^^^
+note: required because it appears within the type `alloc::raw_vec::RawVec<TimestepEmbedder>`
+   --> C:\Users\Steve Business\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\alloc\src\raw_vec\mod.rs:74:19
+    |
+ 74 | pub(crate) struct RawVec<T, A: Allocator = Global> {
+    |                   ^^^^^^
+note: required because it appears within the type `Vec<TimestepEmbedder>`
+   --> C:\Users\Steve Business\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\alloc\src\vec\mod.rs:434:12
+    |
+434 | pub struct Vec<T, #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator = Global> {
+    |            ^^^
+note: required because it appears within the type `SimpleMLPAdaLN`
+   --> D:\pocket-tts-candle\candle\crates\pocket-tts\src\modules\mlp.rs:204:12
+    |
+204 | pub struct SimpleMLPAdaLN {
+    |            ^^^^^^^^^^^^^^
+note: required because it appears within the type `FlowLMModel`
+   --> D:\pocket-tts-candle\candle\crates\pocket-tts\src\models\flow_lm.rs:35:12
+    |
+ 35 | pub struct FlowLMModel {
+    |            ^^^^^^^^^^^
+note: required because it appears within the type `TTSModel`
+   --> D:\pocket-tts-candle\candle\crates\pocket-tts\src\tts_model.rs:25:12
+    |
+ 25 | pub struct TTSModel {
+    |            ^^^^^^^^
+    = note: required for `Arc<TTSModel>` to implement `Send`
+note: required because it's used within this closure
+   --> crates\pocket-tts-cli\src\server\handlers.rs:41:46
+    |
+ 41 |     let result = tokio::task::spawn_blocking(move || {
+    |                                              ^^^^^^^
+note: required by a bound in `spawn_blocking`
+   --> C:\Users\Steve Business\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.49.0\src\task\blocking.rs:207:28
+    |
+205 |     pub fn spawn_blocking<F, R>(f: F) -> JoinHandle<R>
+    |            -------------- required by a bound in this function
+206 |     where
+207 |         F: FnOnce() -> R + Send + 'static,
+    |                            ^^^^ required by this bound in `spawn_blocking`
+    = note: the full name for the type has been written to 'D:\pocket-tts-candle\candle\target\debug\deps\pocket_tts_cli-7180fc6c22c1041d.long-type-5580944524954153857.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+help: use parentheses to call this trait object
+    |
+ 89 |     }(/* &candle_core::tensor::Tensor */)).await;
+    |      ++++++++++++++++++++++++++++++++++++
+
+error[E0277]: the trait bound `fn(State<AppState>, Json<...>) -> ... {generate}: Handler<_, _>` is not satisfied
+   --> crates\pocket-tts-cli\src\server\routes.rs:12:34
+    |
+ 12 |         .route("/generate", post(handlers::generate))
+    |                             ---- ^^^^^^^^^^^^^^^^^^ the trait `Handler<_, _>` is not implemented for fn item `fn(State<AppState>, Json<GenerateRequest>) -> ... {generate}`
+    |                             |
+    |                             required by a bound introduced by this call
+    |
+    = note: Consider using `#[axum::debug_handler]` to improve the error message
+    = help: the following other types implement trait `Handler<T, S>`:
+              `MethodRouter<S>` implements `Handler<(), S>`
+              `axum::handler::Layered<L, H, T, S>` implements `Handler<T, S>`
+note: required by a bound in `post`
+   --> C:\Users\Steve Business\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\axum-0.7.9\src\routing\method_routing.rs:443:1
+    |
+443 | top_level_handler_fn!(post, POST);
+    | ^^^^^^^^^^^^^^^^^^^^^^----^^^^^^^
+    | |                     |
+    | |                     required by a bound in this function
+    | required by this bound in `post`
+    = note: the full name for the type has been written to 'D:\pocket-tts-candle\candle\target\debug\deps\pocket_tts_cli-7180fc6c22c1041d.long-type-9288408675007431383.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+    = note: this error originates in the macro `top_level_handler_fn` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `fn(State<AppState>, Json<...>) -> ... {openai_speech}: Handler<_, _>` is not satisfied
+   --> crates\pocket-tts-cli\src\server\routes.rs:13:41
+    |
+ 13 |         .route("/v1/audio/speech", post(handlers::openai_speech))
+    |                                    ---- ^^^^^^^^^^^^^^^^^^^^^^^ the trait `Handler<_, _>` is not implemented for fn item `fn(State<AppState>, Json<OpenAIRequest>) -> ... {openai_speech}`
+    |                                    |
+    |                                    required by a bound introduced by this call
+    |
+    = note: Consider using `#[axum::debug_handler]` to improve the error message
+    = help: the following other types implement trait `Handler<T, S>`:
+              `MethodRouter<S>` implements `Handler<(), S>`
+              `axum::handler::Layered<L, H, T, S>` implements `Handler<T, S>`
+note: required by a bound in `post`
+   --> C:\Users\Steve Business\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\axum-0.7.9\src\routing\method_routing.rs:443:1
+    |
+443 | top_level_handler_fn!(post, POST);
+    | ^^^^^^^^^^^^^^^^^^^^^^----^^^^^^^
+    | |                     |
+    | |                     required by a bound in this function
+    | required by this bound in `post`
+    = note: the full name for the type has been written to 'D:\pocket-tts-candle\candle\target\debug\deps\pocket_tts_cli-7180fc6c22c1041d.long-type-15180515470825445968.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+    = note: this error originates in the macro `top_level_handler_fn` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: `dyn Fn(&Tensor) -> Result<Tensor, Error>` cannot be shared between threads safely
+   --> crates\pocket-tts-cli\src\server\routes.rs:10:5
+    |
+ 10 |     Router::new()
+    |     ^^^^^^^^^^^^^ `dyn Fn(&Tensor) -> Result<Tensor, Error>` cannot be shared between threads safely
+    |
+    = help: the trait `Sync` is not implemented for `dyn Fn(&Tensor) -> Result<Tensor, Error>`
+    = note: required for `Unique<dyn Fn(&Tensor) -> Result<Tensor, Error>>` to implement `Sync`
+note: required because it appears within the type `Box<dyn Fn(&Tensor) -> Result<Tensor, Error>>`
+   --> C:\Users\Steve Business\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\alloc\src\boxed.rs:231:12
+    |
+231 | pub struct Box<
+    |            ^^^
+note: required because it appears within the type `PhantomData<Box<dyn Fn(&Tensor) -> Result<Tensor, Error>>>`
+   --> C:\Users\Steve Business\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\core\src\marker.rs:822:12
+    |
+822 | pub struct PhantomData<T: PointeeSized>;
+    |            ^^^^^^^^^^^
+note: required because it appears within the type `RawVec<Box<dyn Fn(&Tensor) -> Result<Tensor, Error>>>`
+   --> C:\Users\Steve Business\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\alloc\src\raw_vec\mod.rs:74:19
+    |
+ 74 | pub(crate) struct RawVec<T, A: Allocator = Global> {
+    |                   ^^^^^^
+note: required because it appears within the type `Vec<Box<dyn Fn(&Tensor) -> Result<Tensor, Error>>>`
+   --> C:\Users\Steve Business\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\alloc\src\vec\mod.rs:434:12
+    |
+434 | pub struct Vec<T, #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator = Global> {
+    |            ^^^
+note: required because it appears within the type `TimestepEmbedder`
+   --> D:\pocket-tts-candle\candle\crates\pocket-tts\src\modules\mlp.rs:81:12
+    |
+ 81 | pub struct TimestepEmbedder {
+    |            ^^^^^^^^^^^^^^^^
+note: required because it appears within the type `PhantomData<TimestepEmbedder>`
+   --> C:\Users\Steve Business\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\core\src\marker.rs:822:12
+    |
+822 | pub struct PhantomData<T: PointeeSized>;
+    |            ^^^^^^^^^^^
+note: required because it appears within the type `alloc::raw_vec::RawVec<TimestepEmbedder>`
+   --> C:\Users\Steve Business\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\alloc\src\raw_vec\mod.rs:74:19
+    |
+ 74 | pub(crate) struct RawVec<T, A: Allocator = Global> {
+    |                   ^^^^^^
+note: required because it appears within the type `Vec<TimestepEmbedder>`
+   --> C:\Users\Steve Business\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\alloc\src\vec\mod.rs:434:12
+    |
+434 | pub struct Vec<T, #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator = Global> {
+    |            ^^^
+note: required because it appears within the type `SimpleMLPAdaLN`
+   --> D:\pocket-tts-candle\candle\crates\pocket-tts\src\modules\mlp.rs:204:12
+    |
+204 | pub struct SimpleMLPAdaLN {
+    |            ^^^^^^^^^^^^^^
+note: required because it appears within the type `FlowLMModel`
+   --> D:\pocket-tts-candle\candle\crates\pocket-tts\src\models\flow_lm.rs:35:12
+    |
+ 35 | pub struct FlowLMModel {
+    |            ^^^^^^^^^^^
+note: required because it appears within the type `TTSModel`
+   --> D:\pocket-tts-candle\candle\crates\pocket-tts\src\tts_model.rs:25:12
+    |
+ 25 | pub struct TTSModel {
+    |            ^^^^^^^^
+    = note: required for `Arc<TTSModel>` to implement `Send`
+note: required because it appears within the type `AppState`
+   --> crates\pocket-tts-cli\src\server\state.rs:6:12
+    |
+  6 | pub struct AppState {
+    |            ^^^^^^^^
+note: required by a bound in `Router::<S>::new`
+   --> C:\Users\Steve Business\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\axum-0.7.9\src\routing\mod.rs:133:16
+    |
+133 |     S: Clone + Send + Sync + 'static,
+    |                ^^^^ required by this bound in `Router::<S>::new`
+...
+139 |     pub fn new() -> Self {
+    |            --- required by a bound in this associated function
+    = note: the full name for the type has been written to 'D:\pocket-tts-candle\candle\target\debug\deps\pocket_tts_cli-7180fc6c22c1041d.long-type-5580944524954153857.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: `dyn Fn(&Tensor) -> Result<Tensor, Error>` cannot be sent between threads safely
+   --> crates\pocket-tts-cli\src\server\routes.rs:10:5
+    |
+ 10 |     Router::new()
+    |     ^^^^^^^^^^^^^ `dyn Fn(&Tensor) -> Result<Tensor, Error>` cannot be sent between threads safely
+    |
+    = help: the trait `Send` is not implemented for `dyn Fn(&Tensor) -> Result<Tensor, Error>`
+    = note: required for `Unique<dyn Fn(&Tensor) -> Result<Tensor, Error>>` to implement `Send`
+note: required because it appears within the type `Box<dyn Fn(&Tensor) -> Result<Tensor, Error>>`
+   --> C:\Users\Steve Business\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\alloc\src\boxed.rs:231:12
+    |
+231 | pub struct Box<
+    |            ^^^
+note: required because it appears within the type `PhantomData<Box<dyn Fn(&Tensor) -> Result<Tensor, Error>>>`
+   --> C:\Users\Steve Business\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\core\src\marker.rs:822:12
+    |
+822 | pub struct PhantomData<T: PointeeSized>;
+    |            ^^^^^^^^^^^
+note: required because it appears within the type `RawVec<Box<dyn Fn(&Tensor) -> Result<Tensor, Error>>>`
+   --> C:\Users\Steve Business\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\alloc\src\raw_vec\mod.rs:74:19
+    |
+ 74 | pub(crate) struct RawVec<T, A: Allocator = Global> {
+    |                   ^^^^^^
+note: required because it appears within the type `Vec<Box<dyn Fn(&Tensor) -> Result<Tensor, Error>>>`
+   --> C:\Users\Steve Business\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\alloc\src\vec\mod.rs:434:12
+    |
+434 | pub struct Vec<T, #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator = Global> {
+    |            ^^^
+note: required because it appears within the type `TimestepEmbedder`
+   --> D:\pocket-tts-candle\candle\crates\pocket-tts\src\modules\mlp.rs:81:12
+    |
+ 81 | pub struct TimestepEmbedder {
+    |            ^^^^^^^^^^^^^^^^
+note: required because it appears within the type `PhantomData<TimestepEmbedder>`
+   --> C:\Users\Steve Business\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\core\src\marker.rs:822:12
+    |
+822 | pub struct PhantomData<T: PointeeSized>;
+    |            ^^^^^^^^^^^
+note: required because it appears within the type `alloc::raw_vec::RawVec<TimestepEmbedder>`
+   --> C:\Users\Steve Business\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\alloc\src\raw_vec\mod.rs:74:19
+    |
+ 74 | pub(crate) struct RawVec<T, A: Allocator = Global> {
+    |                   ^^^^^^
+note: required because it appears within the type `Vec<TimestepEmbedder>`
+   --> C:\Users\Steve Business\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\alloc\src\vec\mod.rs:434:12
+    |
+434 | pub struct Vec<T, #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator = Global> {
+    |            ^^^
+note: required because it appears within the type `SimpleMLPAdaLN`
+   --> D:\pocket-tts-candle\candle\crates\pocket-tts\src\modules\mlp.rs:204:12
+    |
+204 | pub struct SimpleMLPAdaLN {
+    |            ^^^^^^^^^^^^^^
+note: required because it appears within the type `FlowLMModel`
+   --> D:\pocket-tts-candle\candle\crates\pocket-tts\src\models\flow_lm.rs:35:12
+    |
+ 35 | pub struct FlowLMModel {
+    |            ^^^^^^^^^^^
+note: required because it appears within the type `TTSModel`
+   --> D:\pocket-tts-candle\candle\crates\pocket-tts\src\tts_model.rs:25:12
+    |
+ 25 | pub struct TTSModel {
+    |            ^^^^^^^^
+    = note: required for `Arc<TTSModel>` to implement `Send`
+note: required because it appears within the type `AppState`
+   --> crates\pocket-tts-cli\src\server\state.rs:6:12
+    |
+  6 | pub struct AppState {
+    |            ^^^^^^^^
+note: required by a bound in `Router::<S>::new`
+   --> C:\Users\Steve Business\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\axum-0.7.9\src\routing\mod.rs:133:16
+    |
+133 |     S: Clone + Send + Sync + 'static,
+    |                ^^^^ required by this bound in `Router::<S>::new`
+...
+139 |     pub fn new() -> Self {
+    |            --- required by a bound in this associated function
+    = note: the full name for the type has been written to 'D:\pocket-tts-candle\candle\target\debug\deps\pocket_tts_cli-7180fc6c22c1041d.long-type-5580944524954153857.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+
+For more information about this error, try `rustc --explain E0277`.
+warning: `pocket-tts-cli` (bin "pocket-tts-cli") generated 1 warning
+error: could not compile `pocket-tts-cli` (bin "pocket-tts-cli") due to 6 previous errors; 1 warning emitted

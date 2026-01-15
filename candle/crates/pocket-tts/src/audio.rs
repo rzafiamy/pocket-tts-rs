@@ -40,6 +40,15 @@ pub fn read_wav<P: AsRef<Path>>(path: P) -> Result<(Tensor, u32)> {
 }
 
 pub fn write_wav<P: AsRef<Path>>(path: P, audio: &Tensor, sample_rate: u32) -> Result<()> {
+    let mut writer = std::fs::File::create(path)?;
+    write_wav_to_writer(&mut writer, audio, sample_rate)
+}
+
+pub fn write_wav_to_writer<W: std::io::Write + std::io::Seek>(
+    writer: W,
+    audio: &Tensor,
+    sample_rate: u32,
+) -> Result<()> {
     let shape = audio.dims();
     if shape.len() != 2 {
         anyhow::bail!(
@@ -57,7 +66,7 @@ pub fn write_wav<P: AsRef<Path>>(path: P, audio: &Tensor, sample_rate: u32) -> R
         sample_format: hound::SampleFormat::Int,
     };
 
-    let mut writer = WavWriter::create(path, spec)?;
+    let mut wav_writer = WavWriter::new(writer, spec)?;
     let data = audio.to_vec2::<f32>()?;
 
     // Interleave channels if more than 1
@@ -65,11 +74,11 @@ pub fn write_wav<P: AsRef<Path>>(path: P, audio: &Tensor, sample_rate: u32) -> R
         for (i, _) in data[0].iter().enumerate() {
             for channel_data in &data {
                 let val = (channel_data[i].clamp(-1.0, 1.0) * 32767.0) as i16;
-                writer.write_sample(val)?;
+                wav_writer.write_sample(val)?;
             }
         }
     }
-    writer.finalize()?;
+    wav_writer.finalize()?;
     Ok(())
 }
 
@@ -117,6 +126,44 @@ pub fn resample_linear(audio: &Tensor, from_rate: u32, to_rate: u32) -> Result<T
         (channels, new_num_samples),
         audio.device(),
     )?)
+}
+
+pub fn read_wav_from_bytes(bytes: &[u8]) -> Result<(Tensor, u32)> {
+    let cursor = std::io::Cursor::new(bytes);
+    let mut reader = WavReader::new(cursor).map_err(|e| candle_core::Error::Msg(e.to_string()))?;
+    let spec = reader.spec();
+    let samples: Vec<f32> = match spec.sample_format {
+        hound::SampleFormat::Float => reader
+            .samples::<f32>()
+            .map(|s| s.map_err(|e| anyhow::anyhow!(e)))
+            .collect::<Result<Vec<f32>>>()?,
+        hound::SampleFormat::Int => {
+            let max_val = 2u32.pow(spec.bits_per_sample as u32 - 1) as f32;
+            reader
+                .samples::<i32>()
+                .map(|s| {
+                    s.map(|v| v as f32 / max_val)
+                        .map_err(|e| anyhow::anyhow!(e))
+                })
+                .collect::<Result<Vec<f32>>>()?
+        }
+    };
+
+    let duration = samples.len() / spec.channels as usize;
+    let data = Tensor::from_vec(
+        samples,
+        (spec.channels as usize, duration),
+        &candle_core::Device::Cpu,
+    )?;
+
+    // Mix down to mono if necessary
+    let data = if spec.channels > 1 {
+        data.mean(0)?
+    } else {
+        data.flatten(0, 1)?
+    };
+
+    Ok((data, spec.sample_rate))
 }
 
 #[cfg(test)]

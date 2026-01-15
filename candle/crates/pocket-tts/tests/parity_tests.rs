@@ -300,7 +300,7 @@ fn test_mimi_latents_parity() {
     };
 
     // Layer 3: Downsample (ratio 4)
-    let layer3_out = if let Some(layer3_ref) = tensors.get("layer3_out") {
+    let _layer3_out = if let Some(layer3_ref) = tensors.get("layer3_out") {
         let out = model.mimi.encoder.layers[3]
             .forward(&layer2_out, &mut state)
             .expect("layer3 failed");

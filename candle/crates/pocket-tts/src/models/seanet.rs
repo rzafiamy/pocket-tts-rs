@@ -9,7 +9,7 @@ pub struct SEANetResnetBlock {
     pub _name: String,
 }
 
-pub trait StreamingLayer {
+pub trait StreamingLayer: Send + Sync {
     fn forward(&self, x: &Tensor, model_state: &mut ModelState) -> Result<Tensor>;
 }
 
@@ -84,7 +84,7 @@ pub struct SEANetEncoder {
     pub _name: String,
 }
 
-pub trait StreamingLayerWrapper {
+pub trait StreamingLayerWrapper: Send + Sync {
     fn forward(&self, x: &Tensor, model_state: &mut ModelState) -> Result<Tensor>;
     fn weight(&self) -> Option<&Tensor> {
         None
@@ -233,7 +233,7 @@ pub struct SEANetDecoder {
     pub _name: String,
 }
 
-pub trait StreamingLayerDecoderWrapper {
+pub trait StreamingLayerDecoderWrapper: Send + Sync {
     fn forward(&self, x: &Tensor, model_state: &mut ModelState) -> Result<Tensor>;
 }
 
