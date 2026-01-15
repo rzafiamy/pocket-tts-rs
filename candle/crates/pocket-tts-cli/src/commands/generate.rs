@@ -1,176 +1,268 @@
+//! Generate command implementation
+//!
+//! Provides `pocket-tts generate` for text-to-speech synthesis.
+
 use anyhow::Result;
 use clap::Parser;
+use indicatif::{ProgressBar, ProgressStyle};
+use owo_colors::OwoColorize;
 use pocket_tts::TTSModel;
 use std::path::PathBuf;
 
+use crate::voice::{PREDEFINED_VOICES, resolve_voice};
+
+/// Default text shown when user runs without --text
+pub const DEFAULT_TEXT: &str =
+    "Hello world! I am Pocket TTS, running blazingly fast in Rust. I hope you'll like me.";
+
 #[derive(Parser, Debug)]
 pub struct GenerateArgs {
-    /// Text to synthesize
-    #[arg(short, long)]
+    /// Text to synthesize (defaults to a greeting if not specified)
+    #[arg(short, long, default_value = DEFAULT_TEXT)]
     pub text: String,
 
-    /// Path to voice reference audio for voice cloning (optional)
-    /// Also accepts predefined voice names like 'alba', 'marius', etc.
+    /// Voice for synthesis. Can be:
+    /// - Predefined name: alba, marius, javert, jean, fantine, cosette, eponine, azelma
+    /// - Path to .wav file for voice cloning
+    /// - Path to .safetensors embeddings file
+    /// - HuggingFace URL: hf://owner/repo/file.wav
     #[arg(short, long)]
     pub voice: Option<String>,
 
-    /// Output file path
+    /// Output audio file path
     #[arg(short, long, default_value = "output.wav")]
     pub output: PathBuf,
 
-    /// Sampling temperature (default: 0.7)
+    /// Model variant (default: b6369a24)
+    #[arg(long, default_value = "b6369a24")]
+    pub variant: String,
+
+    /// Sampling temperature (higher = more variation)
     #[arg(long, default_value = "0.7")]
     pub temperature: f32,
 
-    /// LSD decode steps (default: 1)
+    /// LSD decode steps (more steps = better quality, slower)
     #[arg(long, default_value = "1")]
     pub lsd_decode_steps: usize,
 
-    /// EOS threshold (default: -4.0)
+    /// EOS threshold (more negative = longer audio)
     #[arg(long, default_value = "-4.0")]
     pub eos_threshold: f32,
 
-    /// Stream audio to stdout (raw 16-bit PCM)
+    /// Noise clamp value (optional)
+    #[arg(long)]
+    pub noise_clamp: Option<f32>,
+
+    /// Frames to generate after EOS detection (optional, auto-estimated if not set)
+    #[arg(long)]
+    pub frames_after_eos: Option<usize>,
+
+    /// Stream raw PCM audio to stdout (for piping to audio players)
     #[arg(long)]
     pub stream: bool,
+
+    /// Suppress all output except errors
+    #[arg(short, long)]
+    pub quiet: bool,
+}
+
+/// Print styled message (respects quiet mode)
+macro_rules! info {
+    ($quiet:expr, $($arg:tt)*) => {
+        if !$quiet {
+            println!($($arg)*);
+        }
+    };
 }
 
 pub fn run(args: GenerateArgs) -> Result<()> {
-    if !args.stream {
-        println!("Loading model...");
+    let quiet = args.quiet || args.stream;
+
+    // Print banner
+    if !quiet {
+        print_banner();
     }
+
+    // Load model
+    info!(quiet, "{} Loading model...", "▶".cyan());
+
     let model = TTSModel::load_with_params(
-        "b6369a24",
+        &args.variant,
         args.temperature,
         args.lsd_decode_steps,
         args.eos_threshold,
     )?;
 
-    // Predefined voices
-    let predefined_voices = [
-        "alba", "marius", "javert", "jean", "fantine", "cosette", "eponine", "azelma",
-    ];
+    info!(
+        quiet,
+        "  {} Model loaded (sample rate: {}Hz)",
+        "✓".green(),
+        model.sample_rate
+    );
 
-    let voice_state = if let Some(ref v) = args.voice {
-        if predefined_voices.contains(&v.as_str()) {
-            if !args.stream {
-                println!("Using predefined stock voice: {}", v);
-            }
-            // Try to find in HF cache on D:
-            let cache_path = format!(
-                "D:\\huggingface\\hub\\models--kyutai--pocket-tts-without-voice-cloning\\snapshots\\d4fdd22ae8c8e1cb3634e150ebeff1dab2d16df3\\embeddings\\{}.safetensors",
-                v
-            );
-            let path = std::path::PathBuf::from(cache_path);
-            if path.exists() {
-                model.get_voice_state_from_prompt_file(path)?
-            } else {
-                anyhow::bail!(
-                    "Predefined voice '{}' found in config but .safetensors file not found at {:?}",
-                    v,
-                    path
-                );
-            }
-        } else {
-            if !args.stream {
-                println!("Using voice cloning from: {:?}", v);
-            }
-            model.get_voice_state(v)?
-        }
-    } else {
-        // Default to alba stock voice
-        if !args.stream {
-            println!("No voice specified, defaulting to stock voice: alba");
-        }
-        let cache_path = "D:\\huggingface\\hub\\models--kyutai--pocket-tts-without-voice-cloning\\snapshots\\d4fdd22ae8c8e1cb3634e150ebeff1dab2d16df3\\embeddings\\alba.safetensors";
-        let path = std::path::PathBuf::from(cache_path);
-        if path.exists() {
-            model.get_voice_state_from_prompt_file(path)?
-        } else {
-            if !args.stream {
-                println!(
-                    "Warning: alba.safetensors not found in cache, using empty state (not recommended)"
-                );
-            }
-            pocket_tts::voice_state::init_states(1, 1000)
-        }
-    };
+    // Resolve voice
+    let voice_display = args.voice.as_deref().unwrap_or("alba (default)");
+    info!(
+        quiet,
+        "{} Using voice: {}",
+        "▶".cyan(),
+        voice_display.yellow()
+    );
 
+    let voice_state = resolve_voice(&model, args.voice.as_deref())?;
+
+    info!(quiet, "  {} Voice ready", "✓".green());
+
+    // Generate
     if args.stream {
-        use std::io::Write;
-        let mut stdout = std::io::stdout();
-
-        // Generate stream
-        for chunk_res in model.generate_stream(&args.text, &voice_state) {
-            let chunk = chunk_res?;
-            // Convert tensor to Vec<u8> (16-bit PCM)
-            let chunk = chunk.squeeze(0)?;
-            let data = chunk.to_vec2::<f32>()?;
-            for (i, _) in data[0].iter().enumerate() {
-                for channel_data in &data {
-                    let val = (channel_data[i].clamp(-1.0, 1.0) * 32767.0) as i16;
-                    stdout.write_all(&val.to_le_bytes())?;
-                }
-            }
-            stdout.flush()?;
-        }
+        run_streaming(&model, &args.text, &voice_state)
     } else {
-        use candle_core::Tensor;
-        use indicatif::{ProgressBar, ProgressStyle};
+        run_to_file(&model, &args, &voice_state, quiet)
+    }
+}
 
-        println!("Generating: \"{}\"", args.text);
+/// Run streaming generation to stdout
+fn run_streaming(model: &TTSModel, text: &str, voice_state: &pocket_tts::ModelState) -> Result<()> {
+    use std::io::Write;
+    let mut stdout = std::io::stdout();
 
-        let total_steps = model.estimate_generation_steps(&args.text) as u64;
+    for chunk_res in model.generate_stream(text, voice_state) {
+        let chunk = chunk_res?;
+        // Convert tensor to 16-bit PCM
+        let chunk = chunk.squeeze(0)?;
+        let data = chunk.to_vec2::<f32>()?;
+
+        for (i, _) in data[0].iter().enumerate() {
+            for channel_data in &data {
+                let val = (channel_data[i].clamp(-1.0, 1.0) * 32767.0) as i16;
+                stdout.write_all(&val.to_le_bytes())?;
+            }
+        }
+        stdout.flush()?;
+    }
+
+    Ok(())
+}
+
+/// Run generation to file with progress bar
+fn run_to_file(
+    model: &TTSModel,
+    args: &GenerateArgs,
+    voice_state: &pocket_tts::ModelState,
+    quiet: bool,
+) -> Result<()> {
+    use candle_core::Tensor;
+
+    info!(
+        quiet,
+        "{} Generating: \"{}\"",
+        "▶".cyan(),
+        truncate_text(&args.text, 60).italic()
+    );
+
+    let total_steps = model.estimate_generation_steps(&args.text) as u64;
+
+    let pb = if quiet {
+        ProgressBar::hidden()
+    } else {
         let pb = ProgressBar::new(total_steps);
         pb.set_style(
             ProgressStyle::default_bar()
-                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} ({eta}) {msg}")
+                .template(
+                    "{spinner:.cyan} [{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg}",
+                )
                 .unwrap()
-                .progress_chars("##-"),
+                .progress_chars("█▓░"),
         );
-        pb.set_message("Generating...");
+        pb.set_message("generating...");
+        pb
+    };
 
-        let mut audio_chunks = Vec::new();
-        let mut total_samples = 0;
+    let mut audio_chunks = Vec::new();
+    let mut total_samples = 0;
 
-        for chunk_res in model.generate_stream(&args.text, &voice_state) {
-            let chunk = chunk_res?;
-            let dims = chunk.dims();
-            let samples = if dims.len() == 2 { dims[1] } else { dims[0] };
-            total_samples += samples;
+    for chunk_res in model.generate_stream(&args.text, voice_state) {
+        let chunk = chunk_res?;
+        let dims = chunk.dims();
+        let samples = if dims.len() == 2 { dims[1] } else { dims[0] };
+        total_samples += samples;
 
-            audio_chunks.push(chunk);
-            pb.inc(1); // Increment by 1 step (1 chunk)
-            pb.set_message(format!(
-                "{:.2}s",
-                total_samples as f32 / model.sample_rate as f32
-            ));
-        }
+        audio_chunks.push(chunk);
+        pb.inc(1);
+        pb.set_message(format!(
+            "{:.2}s generated",
+            total_samples as f32 / model.sample_rate as f32
+        ));
+    }
 
-        pb.finish_with_message("Done");
+    pb.finish_and_clear();
 
-        // Concatenate all audio chunks
-        if audio_chunks.is_empty() {
-            anyhow::bail!("No audio generated");
-        }
-        let audio = Tensor::cat(&audio_chunks, 2)?;
-        // Remove batch dimension
-        let audio = audio.squeeze(0)?;
+    // Concatenate all audio chunks
+    if audio_chunks.is_empty() {
+        anyhow::bail!("No audio generated - text may be too short or invalid");
+    }
+    let audio = Tensor::cat(&audio_chunks, 2)?;
+    let audio = audio.squeeze(0)?; // Remove batch dimension
 
-        let dims = audio.dims();
-        println!("Audio shape: {:?}", dims);
+    let dims = audio.dims();
+    let num_samples = if dims.len() == 2 { dims[1] } else { dims[0] };
+    let duration_sec = num_samples as f32 / model.sample_rate as f32;
 
-        let num_samples = if dims.len() == 2 { dims[1] } else { dims[0] };
-        let duration_sec = num_samples as f32 / model.sample_rate as f32;
+    // Save to file
+    info!(
+        quiet,
+        "{} Saving to: {}",
+        "▶".cyan(),
+        args.output.display().yellow()
+    );
+    pocket_tts::audio::write_wav(&args.output, &audio, model.sample_rate as u32)?;
 
-        println!("Saving to: {:?}", args.output);
-        pocket_tts::audio::write_wav(&args.output, &audio, model.sample_rate as u32)?;
-
+    // Success message
+    if !quiet {
+        println!();
         println!(
-            "Done! Generated {} samples ({:.2}s at {}Hz)",
-            num_samples, duration_sec, model.sample_rate
+            "  {} {}",
+            "✓".green().bold(),
+            "Audio generated successfully!".green().bold()
+        );
+        println!(
+            "    Duration: {:.2}s ({} samples @ {}Hz)",
+            duration_sec, num_samples, model.sample_rate
+        );
+        println!("    Output:   {}", args.output.display().cyan());
+        println!();
+        println!(
+            "  {} {}",
+            "💡".dimmed(),
+            format!("Play with: ffplay -autoexit {:?}", args.output).dimmed()
         );
     }
 
     Ok(())
+}
+
+/// Print startup banner
+fn print_banner() {
+    println!();
+    println!("  {}  {}", "🗣️".bold(), "Pocket TTS".bold().cyan());
+    println!(
+        "      {} {}",
+        "Rust/Candle port".dimmed(),
+        format!("v{}", env!("CARGO_PKG_VERSION")).dimmed()
+    );
+    println!();
+}
+
+/// Truncate text for display
+fn truncate_text(text: &str, max_len: usize) -> String {
+    if text.len() <= max_len {
+        text.to_string()
+    } else {
+        format!("{}...", &text[..max_len - 3])
+    }
+}
+
+/// Print available voices (for help text)
+pub fn available_voices_help() -> String {
+    format!("Predefined voices: {}", PREDEFINED_VOICES.join(", "))
 }

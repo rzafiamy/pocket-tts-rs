@@ -4,29 +4,41 @@ use axum::{
 };
 use pocket_tts::TTSModel;
 use pocket_tts_cli::server::{routes, state::AppState};
+use pocket_tts_cli::voice::resolve_voice;
 use serde_json::json;
 use tokio_stream::StreamExt;
-use tower::ServiceExt; // for collecting stream
+use tower::ServiceExt;
 
-#[tokio::test]
-async fn test_api_stream_endpoint() {
+/// Create test app state
+fn create_test_app() -> Option<axum::Router> {
     println!("Loading model for Stream API test...");
     let model = match TTSModel::load("b6369a24") {
         Ok(m) => m,
         Err(e) => {
-            println!("Skipping API test: could not load model: {}", e);
-            return;
+            println!("Skipping test: could not load model: {}", e);
+            return None;
         }
     };
 
-    let state = AppState::new(model);
-    let app = routes::create_router(state);
+    let default_voice = match resolve_voice(&model, Some("alba")) {
+        Ok(v) => v,
+        Err(e) => {
+            println!("Skipping test: could not load voice: {}", e);
+            return None;
+        }
+    };
 
-    let ref_wav = std::path::PathBuf::from("d:\\pocket-tts-candle\\ref.wav");
+    let state = AppState::new(model, default_voice);
+    Some(routes::create_router(state))
+}
+
+#[tokio::test]
+async fn test_api_stream_endpoint() {
+    let Some(app) = create_test_app() else { return };
 
     let body = json!({
         "text": "Streaming test",
-        "voice": ref_wav.to_str().unwrap()
+        // Use default alba voice
     });
 
     let response = app

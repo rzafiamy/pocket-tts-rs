@@ -5,25 +5,37 @@ use axum::{
 use base64::{Engine as _, engine::general_purpose};
 use pocket_tts::TTSModel;
 use pocket_tts_cli::server::{routes, state::AppState};
+use pocket_tts_cli::voice::resolve_voice;
 use serde_json::json;
 use std::path::Path;
 use tower::ServiceExt;
 
-#[tokio::test]
-async fn test_api_base64_cloning() {
-    println!("Loading model for Base64 API test...");
-    // Assume we can load model - reuse logic from server_tests (though this is a separate file potentially)
-    // For simplicity, let's copy the setup.
+/// Create test app state
+fn create_test_app() -> Option<axum::Router> {
     let model = match TTSModel::load("b6369a24") {
         Ok(m) => m,
         Err(e) => {
-            println!("Skipping API test: could not load model: {}", e);
-            return;
+            println!("Skipping test: could not load model: {}", e);
+            return None;
         }
     };
 
-    let state = AppState::new(model);
-    let app = routes::create_router(state);
+    let default_voice = match resolve_voice(&model, Some("alba")) {
+        Ok(v) => v,
+        Err(e) => {
+            println!("Skipping test: could not load voice: {}", e);
+            return None;
+        }
+    };
+
+    let state = AppState::new(model, default_voice);
+    Some(routes::create_router(state))
+}
+
+#[tokio::test]
+async fn test_api_base64_cloning() {
+    println!("Loading model for Base64 API test...");
+    let Some(app) = create_test_app() else { return };
 
     // Read ref.wav to bytes and base64 encode
     let ref_wav = "../../ref.wav";
