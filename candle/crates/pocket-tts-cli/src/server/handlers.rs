@@ -5,7 +5,7 @@ use crate::voice::resolve_voice;
 use axum::{
     Json,
     body::Body,
-    extract::{Multipart, Path, State},
+    extract::{Multipart, State},
     http::{HeaderMap, StatusCode, header},
     response::{Html, IntoResponse, Response},
 };
@@ -31,10 +31,13 @@ pub async fn serve_index() -> impl IntoResponse {
 }
 
 /// Serve static files (CSS, JS, images)
-pub async fn serve_static(Path(path): Path<String>) -> impl IntoResponse {
+pub async fn serve_static(uri: axum::http::Uri) -> impl IntoResponse {
+    let path = uri.path().trim_start_matches('/');
+    let path = percent_encoding::percent_decode_str(path).decode_utf8_lossy();
+
     match StaticAssets::get(&path) {
         Some(content) => {
-            let mime = mime_guess::from_path(&path).first_or_octet_stream();
+            let mime = mime_guess::from_path(path.as_ref()).first_or_octet_stream();
             let mut headers = HeaderMap::new();
             headers.insert(header::CONTENT_TYPE, mime.as_ref().parse().unwrap());
             (headers, content.data.to_vec()).into_response()

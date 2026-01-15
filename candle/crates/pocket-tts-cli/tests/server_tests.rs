@@ -111,4 +111,18 @@ async fn test_web_interface() {
     // Check it returns HTML
     let content_type = response.headers().get("content-type");
     assert!(content_type.is_some());
+
+    // Test static file routing
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/static/index.html")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
 }

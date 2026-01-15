@@ -16,10 +16,13 @@ pub fn create_router(state: AppState) -> Router {
         .allow_methods(Any)
         .allow_headers(Any);
 
+    // Static files router
+    let static_router = Router::new().fallback(handlers::serve_static);
+
     Router::new()
         // Web interface
         .route("/", get(handlers::serve_index))
-        .route("/static/{*path}", get(handlers::serve_static))
+        .nest("/static", static_router)
         // Health check
         .route("/health", get(handlers::health_check))
         // Generation endpoints
