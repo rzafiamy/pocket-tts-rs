@@ -114,12 +114,12 @@ pub fn load_config<P: AsRef<Path>>(path: P) -> anyhow::Result<Config> {
     Ok(config)
 }
 
-/// Default generation parameters
+/// Default generation parameters (matching Python's default_parameters.py)
 pub mod defaults {
-    pub const TEMPERATURE: f32 = 1.0;
-    pub const LSD_DECODE_STEPS: usize = 6;
+    pub const TEMPERATURE: f32 = 0.7;
+    pub const LSD_DECODE_STEPS: usize = 1;
     pub const NOISE_CLAMP: Option<f32> = None;
-    pub const EOS_THRESHOLD: f32 = 0.0;
+    pub const EOS_THRESHOLD: f32 = -4.0;
     pub const DEFAULT_VARIANT: &str = "b6369a24";
 }
 

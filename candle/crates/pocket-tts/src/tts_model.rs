@@ -117,7 +117,7 @@ impl TTSModel {
         let ldim = config.mimi.quantizer.dimension;
         let hidden_dim = dim * config.flow_lm.transformer.hidden_scale;
 
-        // SimpleMLPAdaLN::new(in_channels, model_channels, out_channels, cond_channels, num_res_blocks, num_time_conds, vb)
+        // SimpleMLPAdaLN::new(in_channels, model_channels, out_channels, cond_channels, num_res_blocks, num_time_conds, max_period, vb)
         let flow_net = SimpleMLPAdaLN::new(
             ldim,                      // in_channels (input is latent dim)
             config.flow_lm.flow.dim,   // model_channels
@@ -125,6 +125,7 @@ impl TTSModel {
             dim,                       // cond_channels (conditioning from transformer)
             config.flow_lm.flow.depth, // num_res_blocks
             2,                         // num_time_conds (s and t)
+            config.flow_lm.transformer.max_period as f32,
             vb.pp("flow_lm.flow_net"),
         )?;
 

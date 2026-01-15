@@ -18,6 +18,18 @@ pub struct GenerateArgs {
     #[arg(short, long, default_value = "output.wav")]
     pub output: PathBuf,
 
+    /// Sampling temperature (default: 0.7)
+    #[arg(long, default_value = "0.7")]
+    pub temperature: f32,
+
+    /// LSD decode steps (default: 1)
+    #[arg(long, default_value = "1")]
+    pub lsd_decode_steps: usize,
+
+    /// EOS threshold (default: -4.0)
+    #[arg(long, default_value = "-4.0")]
+    pub eos_threshold: f32,
+
     /// Stream audio to stdout (raw 16-bit PCM)
     #[arg(long)]
     pub stream: bool,
@@ -27,7 +39,12 @@ pub fn run(args: GenerateArgs) -> Result<()> {
     if !args.stream {
         println!("Loading model...");
     }
-    let model = TTSModel::load("b6369a24")?;
+    let model = TTSModel::load_with_params(
+        "b6369a24",
+        args.temperature,
+        args.lsd_decode_steps,
+        args.eos_threshold,
+    )?;
 
     // Predefined voices
     let predefined_voices = [
