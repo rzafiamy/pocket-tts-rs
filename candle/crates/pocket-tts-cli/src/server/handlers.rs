@@ -196,7 +196,9 @@ pub async fn generate_stream(
                         let mut bytes = Vec::new();
                         for (i, _) in data[0].iter().enumerate() {
                             for channel_data in &data {
-                                let val = (channel_data[i].clamp(-1.0, 1.0) * 32767.0) as i16;
+                                // Hard clamp to [-1, 1] to match Python's behavior
+                                let val = channel_data[i].clamp(-1.0, 1.0);
+                                let val = (val * 32767.0) as i16;
                                 bytes.extend_from_slice(&val.to_le_bytes());
                             }
                         }

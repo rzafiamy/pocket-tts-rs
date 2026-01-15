@@ -134,7 +134,9 @@ fn run_streaming(model: &TTSModel, text: &str, voice_state: &pocket_tts::ModelSt
 
         for (i, _) in data[0].iter().enumerate() {
             for channel_data in &data {
-                let val = (channel_data[i].clamp(-1.0, 1.0) * 32767.0) as i16;
+                // Hard clamp to [-1, 1] to match Python's behavior
+                let val = channel_data[i].clamp(-1.0, 1.0);
+                let val = (val * 32767.0) as i16;
                 stdout.write_all(&val.to_le_bytes())?;
             }
         }

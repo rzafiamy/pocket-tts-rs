@@ -67,7 +67,7 @@ fn test_voice_conditioning_parity() {
     let (audio, sr) = read_wav(&get_ref_wav_path()).expect("Failed to read ref.wav");
 
     let audio = if sr != model.sample_rate as u32 {
-        pocket_tts::audio::resample_linear(&audio, sr, model.sample_rate as u32)
+        pocket_tts::audio::resample(&audio, sr, model.sample_rate as u32)
             .expect("Failed to resample")
     } else {
         audio
@@ -199,7 +199,7 @@ fn test_mimi_latents_parity() {
     // The python script does: convert_audio(wav, sr, 24000, 1) which resamples and mixes to mono
     // Our read_wav returns (C, T)
     let audio = if sr != model.sample_rate as u32 {
-        pocket_tts::audio::resample_linear(&audio, sr, model.sample_rate as u32)
+        pocket_tts::audio::resample(&audio, sr, model.sample_rate as u32)
             .expect("Failed to resample")
     } else {
         audio
@@ -372,7 +372,7 @@ fn test_input_parity() {
 
     // Rust preprocessing
     let audio = if sr != model.sample_rate as u32 {
-        pocket_tts::audio::resample_linear(&audio, sr, model.sample_rate as u32)
+        pocket_tts::audio::resample(&audio, sr, model.sample_rate as u32)
             .expect("Failed to resample")
     } else {
         audio

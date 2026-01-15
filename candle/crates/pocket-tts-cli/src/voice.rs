@@ -163,7 +163,7 @@ fn resolve_base64_voice(model: &TTSModel, spec: &str) -> Result<pocket_tts::Mode
 
     // Resample if needed
     let audio = if sample_rate != model.sample_rate as u32 {
-        pocket_tts::audio::resample_linear(&audio, sample_rate, model.sample_rate as u32)?
+        pocket_tts::audio::resample(&audio, sample_rate, model.sample_rate as u32)?
     } else {
         audio
     };

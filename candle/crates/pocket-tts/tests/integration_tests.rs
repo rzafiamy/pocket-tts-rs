@@ -132,7 +132,7 @@ fn test_mimi_encode_decode_roundtrip() {
 
     // Resample if needed
     let audio = if sample_rate != model.sample_rate as u32 {
-        pocket_tts::audio::resample_linear(&audio, sample_rate, model.sample_rate as u32)
+        pocket_tts::audio::resample(&audio, sample_rate, model.sample_rate as u32)
             .expect("Failed to resample")
     } else {
         audio

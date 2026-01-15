@@ -4,7 +4,7 @@
 //! matching Python's `pocket_tts/models/tts_model.py`.
 
 use crate::ModelState;
-use crate::audio::{read_wav, resample_linear};
+use crate::audio::{read_wav, resample};
 use crate::conditioners::text::LUTConditioner;
 use crate::config::{Config, defaults, load_config};
 use crate::models::flow_lm::FlowLMModel;
@@ -256,7 +256,7 @@ impl TTSModel {
 
         // Resample to model sample rate if needed
         let audio = if sample_rate != self.sample_rate as u32 {
-            resample_linear(&audio, sample_rate, self.sample_rate as u32)?
+            resample(&audio, sample_rate, self.sample_rate as u32)?
         } else {
             audio
         };
