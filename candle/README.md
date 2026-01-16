@@ -16,6 +16,7 @@ Text-to-speech that runs entirely on CPU—no Python, no GPU required.
 - **Pause Handling** - Support for natural pauses and explicit `[pause:Xms]` syntax
 - **HTTP API** - REST API server with OpenAI-compatible endpoint
 - **Web UI** - Built-in web interface for interactive use
+- **Python Bindings** - Use the Rust implementation from Python for improved performance
 
 ## Quick Start
 
@@ -160,7 +161,36 @@ Options:
       --variant <VARIANT>        Model variant [default: b6369a24]
       --temperature <FLOAT>      Temperature [default: 0.7]
       --lsd-decode-steps <INT>   LSD steps [default: 1]
+      --lsd-decode-steps <INT>   LSD steps [default: 1]
       --eos-threshold <FLOAT>    EOS threshold [default: -4.0]
+
+## Python Bindings
+
+The Rust implementation can be used as a Python module for improved performance (~1.34x speedup).
+
+### Installation
+
+Requires [maturin](https://github.com/PyO3/maturin).
+
+```bash
+cd candle/crates/pocket-tts-bindings
+uvx maturin develop --release
+```
+
+### Usage
+
+```python
+import pocket_tts_bindings
+
+# Load the model
+model = pocket_tts_bindings.PyTTSModel.load("b6369a24")
+
+# Generate audio
+audio_samples = model.generate(
+    "Hello from Rust!",
+    "path/to/voice.wav"
+)
+```
 
 ### `wasm-demo` command
 
