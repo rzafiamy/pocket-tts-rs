@@ -61,6 +61,10 @@ pub struct GenerateArgs {
     #[arg(long)]
     pub stream: bool,
 
+    /// Use simulated int8 quantization for inference
+    #[arg(long)]
+    pub quantized: bool,
+
     /// Suppress all output except errors
     #[arg(short, long)]
     pub quiet: bool,
@@ -86,12 +90,28 @@ pub fn run(args: GenerateArgs) -> Result<()> {
     // Load model
     info!(quiet, "{} Loading model...", "▶".cyan());
 
-    let model = TTSModel::load_with_params(
-        &args.variant,
-        args.temperature,
-        args.lsd_decode_steps,
-        args.eos_threshold,
-    )?;
+    let model = if args.quantized {
+        #[cfg(feature = "quantized")]
+        {
+            TTSModel::load_quantized_with_params(
+                &args.variant,
+                args.temperature,
+                args.lsd_decode_steps,
+                args.eos_threshold,
+            )?
+        }
+        #[cfg(not(feature = "quantized"))]
+        {
+            anyhow::bail!("Quantization feature not enabled. Rebuild with --features quantized");
+        }
+    } else {
+        TTSModel::load_with_params(
+            &args.variant,
+            args.temperature,
+            args.lsd_decode_steps,
+            args.eos_threshold,
+        )?
+    };
 
     info!(
         quiet,

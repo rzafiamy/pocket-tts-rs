@@ -16,6 +16,7 @@ impl Quantizer {
             padding: 0,
             stride: 1,
             dilation: 1,
+            ..Default::default()
         };
         let output_proj = candle_nn::conv1d_no_bias(
             dimension,
@@ -114,7 +115,7 @@ impl MimiModel {
 
         let t = x.dims()[2];
         let hop = self.frame_size();
-        let x = if t % hop != 0 {
+        let x = if !t.is_multiple_of(hop) {
             let padding = hop - (t % hop);
             let pad = Tensor::zeros((b, c, padding), x.dtype(), x.device())?;
             Tensor::cat(&[x, &pad], 2)?

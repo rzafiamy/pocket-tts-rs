@@ -1,8 +1,10 @@
 //! Voice state management for streaming generation and voice cloning
 
-use crate::ModelState;
 use candle_core::{Result, Tensor};
 use std::collections::HashMap;
+
+/// Model state type for stateful modules
+pub type ModelState = HashMap<String, HashMap<String, Tensor>>;
 
 /// Initialize empty model state for all stateful modules
 ///

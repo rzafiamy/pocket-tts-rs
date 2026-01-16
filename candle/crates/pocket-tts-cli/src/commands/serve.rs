@@ -37,6 +37,10 @@ pub struct ServeArgs {
     /// EOS threshold
     #[arg(long, default_value = "-4.0")]
     pub eos_threshold: f32,
+
+    /// Use simulated int8 quantization for inference
+    #[arg(long)]
+    pub quantized: bool,
 }
 
 pub async fn run(args: ServeArgs) -> Result<()> {

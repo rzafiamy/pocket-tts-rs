@@ -1,13 +1,21 @@
 use anyhow::Result;
-use candle_core::Device;
-use hf_hub::api::sync::ApiBuilder;
-use hf_hub::{Repo, RepoType};
 use std::path::PathBuf;
+
+#[cfg(not(target_arch = "wasm32"))]
+use candle_core::Device;
+
+#[cfg(not(target_arch = "wasm32"))]
+use hf_hub::api::sync::ApiBuilder;
+#[cfg(not(target_arch = "wasm32"))]
+use hf_hub::{Repo, RepoType};
 
 /// Download a file from HuggingFace Hub if necessary.
 ///
 /// Supports the format: `hf://owner/repo/filename@revision`
 /// where `@revision` is optional.
+///
+/// Note: Not available on wasm32 targets (use local file loading instead).
+#[cfg(not(target_arch = "wasm32"))]
 pub fn download_if_necessary(file_path: &str) -> Result<PathBuf> {
     if file_path.starts_with("hf://") {
         let path = file_path.trim_start_matches("hf://");
@@ -49,6 +57,16 @@ pub fn download_if_necessary(file_path: &str) -> Result<PathBuf> {
     }
 }
 
+/// WASM version: Only supports local file paths
+#[cfg(target_arch = "wasm32")]
+pub fn download_if_necessary(file_path: &str) -> Result<PathBuf> {
+    if file_path.starts_with("hf://") {
+        anyhow::bail!("HuggingFace Hub downloads not supported on WASM. Use local file paths.");
+    }
+    Ok(PathBuf::from(file_path))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn load_weights(
     file_path: &str,
     _device: &Device,
@@ -70,6 +88,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn test_invalid_hf_path() {
         let path = "hf://invalid";
         let res = download_if_necessary(path);
@@ -77,6 +96,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn test_parse_revision() {
         // Test parsing logic (doesn't actually download)
         let path = "hf://kyutai/pocket-tts/file.safetensors@abc123def";

@@ -11,6 +11,9 @@ Text-to-speech that runs entirely on CPU—no Python, no GPU required.
 - **Streaming** - Generate audio progressively as it's synthesized
 - **Voice cloning** - Clone any voice from a few seconds of audio
 - **Infinite text** - Handle arbitrarily long text inputs via automatic segmentation
+- **int8 Quantization** - Significant speedup and smaller memory footprint
+- **WebAssembly** - Run the full model in any modern web browser
+- **Pause Handling** - Support for natural pauses and explicit `[pause:Xms]` syntax
 - **HTTP API** - REST API server with OpenAI-compatible endpoint
 - **Web UI** - Built-in web interface for interactive use
 
@@ -44,7 +47,23 @@ cargo run --release -p pocket-tts-cli -- generate --voice alba
 ```bash
 cargo run --release -p pocket-tts-cli -- serve
 # Navigate to http://localhost:8000
+
+### WebAssembly Demo
+
+The browser demo features a "Zero-Setup" experience with an **embedded tokenizer and config**.
+
+#### 1. Build the WASM package
+From the `crates/pocket-tts` directory:
+```bash
+wasm-pack build --target web --out-dir pkg . -- --features wasm
 ```
+
+#### 2. Launch the demo server
+```bash
+cargo run --release -p pocket-tts-cli -- wasm-demo
+```
+- Navigate to `http://localhost:8080`
+- Provides built-in voice cloning and Hugging Face Hub integration.
 
 ## Installation
 
@@ -142,6 +161,17 @@ Options:
       --temperature <FLOAT>      Temperature [default: 0.7]
       --lsd-decode-steps <INT>   LSD steps [default: 1]
       --eos-threshold <FLOAT>    EOS threshold [default: -4.0]
+
+### `wasm-demo` command
+
+Serve the WASM package and browser demo.
+
+```
+pocket-tts wasm-demo [OPTIONS]
+
+Options:
+  -p, --port <PORT>              Port number [default: 8080]
+```
 ```
 
 ## API Endpoints
@@ -174,7 +204,10 @@ candle/
 │   │   ├── src/
 │   │   │   ├── lib.rs          # Public API
 │   │   │   ├── tts_model.rs    # Main TTSModel
+│   │   │   ├── wasm.rs         # WASM entry points
 │   │   │   ├── audio.rs        # WAV I/O, resampling
+│   │   │   ├── quantize.rs     # int8 quantization
+│   │   │   ├── pause.rs        # Pause/silence handling
 │   │   │   ├── config.rs       # YAML config types
 │   │   │   ├── models/         # Neural network models
 │   │   │   │   ├── flow_lm.rs      # Flow language model

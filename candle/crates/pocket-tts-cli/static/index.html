@@ -278,7 +278,7 @@
                     super();
                     this.buffer = [];
                     this.hasStarted = false;
-                    this.BUFFER_THRESHOLD = 24000 * 0.5; // 300ms buffer at 24kHz
+                    this.BUFFER_THRESHOLD = 24000 * 0.9; // 300ms buffer at 24kHz
                     
                     this.port.onmessage = (e) => {
                         // Receive float32 samples

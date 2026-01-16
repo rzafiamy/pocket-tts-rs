@@ -17,12 +17,28 @@ pub async fn start_server(args: ServeArgs) -> Result<()> {
     let _ = tracing_subscriber::fmt::try_init();
 
     // Load model with configured parameters
-    let model = TTSModel::load_with_params(
-        &args.variant,
-        args.temperature,
-        args.lsd_decode_steps,
-        args.eos_threshold,
-    )?;
+    let model = if args.quantized {
+        #[cfg(feature = "quantized")]
+        {
+            TTSModel::load_quantized_with_params(
+                &args.variant,
+                args.temperature,
+                args.lsd_decode_steps,
+                args.eos_threshold,
+            )?
+        }
+        #[cfg(not(feature = "quantized"))]
+        {
+            anyhow::bail!("Quantization feature not enabled. Rebuild with --features quantized");
+        }
+    } else {
+        TTSModel::load_with_params(
+            &args.variant,
+            args.temperature,
+            args.lsd_decode_steps,
+            args.eos_threshold,
+        )?
+    };
 
     println!(
         "  {} Model loaded (sample rate: {}Hz)",

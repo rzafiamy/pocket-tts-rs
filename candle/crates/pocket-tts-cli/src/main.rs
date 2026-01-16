@@ -36,6 +36,11 @@ enum Commands {
     /// Runs a web server providing TTS generation via REST API.
     /// Includes a web interface for interactive use.
     Serve(commands::serve::ServeArgs),
+
+    /// Serve the WASM package and browser demo
+    ///
+    /// Starts a static file server to test the WebAssembly TTS demo in your browser.
+    WasmDemo(commands::wasm_demo::WasmDemoArgs),
 }
 
 #[tokio::main]
@@ -48,5 +53,6 @@ async fn main() -> Result<()> {
             commands::generate::run(cmd_args)
         }
         Commands::Serve(cmd_args) => commands::serve::run(cmd_args).await,
+        Commands::WasmDemo(cmd_args) => commands::wasm_demo::run(cmd_args).await,
     }
 }

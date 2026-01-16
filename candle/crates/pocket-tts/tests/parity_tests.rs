@@ -140,6 +140,7 @@ fn test_mimi_latents_parity() {
 
     let model = TTSModel::load("b6369a24").expect("Failed to load model");
 
+    /*
     // Check initial layers weight stats
     {
         println!("Rust Mimi Encoder weight stats:");
@@ -193,6 +194,7 @@ fn test_mimi_latents_parity() {
             }
         }
     }
+    */
 
     let (audio, sr) = read_wav(&get_ref_wav_path()).expect("Failed to read ref.wav");
     // Preprocessing as in extract_refs.py (convert_audio logic)

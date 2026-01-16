@@ -32,6 +32,7 @@ impl StreamingConv1d {
             padding: 0,
             dilation,
             groups,
+            ..Default::default()
         };
         let conv = if bias {
             candle_nn::conv1d(

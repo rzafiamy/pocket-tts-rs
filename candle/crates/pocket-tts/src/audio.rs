@@ -1,10 +1,26 @@
-use anyhow::Result;
-use candle_core::{Device, Tensor};
-use hound::{WavReader, WavSpec, WavWriter};
+use candle_core::Tensor;
+
+use hound::WavReader;
+#[cfg(not(target_arch = "wasm32"))]
+use hound::{WavSpec, WavWriter};
+
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
-pub fn read_wav<P: AsRef<Path>>(path: P) -> Result<(Tensor, u32)> {
-    let mut reader = WavReader::open(path)?;
+#[cfg(not(target_arch = "wasm32"))]
+pub fn read_wav<P: AsRef<Path>>(path: P) -> anyhow::Result<(Tensor, u32)> {
+    let reader = WavReader::open(path)?;
+    read_wav_internal(reader)
+}
+
+pub fn read_wav_from_bytes(bytes: &[u8]) -> anyhow::Result<(Tensor, u32)> {
+    let reader = WavReader::new(std::io::Cursor::new(bytes))?;
+    read_wav_internal(reader)
+}
+
+fn read_wav_internal<R: std::io::Read + std::io::Seek>(
+    mut reader: WavReader<R>,
+) -> anyhow::Result<(Tensor, u32)> {
     let spec = reader.spec();
     let sample_rate = spec.sample_rate;
     let channels = spec.channels as usize;
@@ -15,9 +31,24 @@ pub fn read_wav<P: AsRef<Path>>(path: P) -> Result<(Tensor, u32)> {
             reader
                 .samples::<i32>()
                 .map(|s| s.map(|v| v as f32 / max_val))
-                .collect::<Result<Vec<_>, _>>()?
+                .collect::<std::result::Result<Vec<_>, _>>()?
         }
-        hound::SampleFormat::Float => reader.samples::<f32>().collect::<Result<Vec<_>, _>>()?,
+        hound::SampleFormat::Float => reader
+            .samples::<f32>()
+            .collect::<std::result::Result<Vec<_>, _>>()?,
+    };
+
+    let device = if cfg!(target_arch = "wasm32") {
+        &candle_core::Device::Cpu
+    } else {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            &candle_core::Device::Cpu
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            &candle_core::Device::Cpu
+        }
     };
 
     let tensor = if channels > 1 {
@@ -30,25 +61,27 @@ pub fn read_wav<P: AsRef<Path>>(path: P) -> Result<(Tensor, u32)> {
                 reshaped[c * num_samples + i] = samples[i * channels + c];
             }
         }
-        Tensor::from_vec(reshaped, (channels, num_samples), &Device::Cpu)?
+        Tensor::from_vec(reshaped, (channels, num_samples), device)?
     } else {
         let n = samples.len();
-        Tensor::from_vec(samples, (1, n), &Device::Cpu)?
+        Tensor::from_vec(samples, (1, n), device)?
     };
 
     Ok((tensor, sample_rate))
 }
 
-pub fn write_wav<P: AsRef<Path>>(path: P, audio: &Tensor, sample_rate: u32) -> Result<()> {
+#[cfg(not(target_arch = "wasm32"))]
+pub fn write_wav<P: AsRef<Path>>(path: P, audio: &Tensor, sample_rate: u32) -> anyhow::Result<()> {
     let mut writer = std::fs::File::create(path)?;
     write_wav_to_writer(&mut writer, audio, sample_rate)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn write_wav_to_writer<W: std::io::Write + std::io::Seek>(
     writer: W,
     audio: &Tensor,
     sample_rate: u32,
-) -> Result<()> {
+) -> anyhow::Result<()> {
     let shape = audio.dims();
     if shape.len() != 2 {
         anyhow::bail!(
@@ -84,7 +117,7 @@ pub fn write_wav_to_writer<W: std::io::Write + std::io::Seek>(
     Ok(())
 }
 
-pub fn normalize_peak(audio: &Tensor) -> Result<Tensor> {
+pub fn normalize_peak(audio: &Tensor) -> anyhow::Result<Tensor> {
     let max_abs = audio.abs()?.max_all()?.to_scalar::<f32>()?;
     if max_abs > 0.0 {
         Ok(audio.affine(1.0 / max_abs as f64, 0.0)?)
@@ -93,9 +126,8 @@ pub fn normalize_peak(audio: &Tensor) -> Result<Tensor> {
     }
 }
 
-// High-quality polyphase resampler using rubato
 // Matches Python's scipy.signal.resample_poly behavior
-pub fn resample(audio: &Tensor, from_rate: u32, to_rate: u32) -> Result<Tensor> {
+pub fn resample(audio: &Tensor, from_rate: u32, to_rate: u32) -> anyhow::Result<Tensor> {
     if from_rate == to_rate {
         return Ok(audio.clone());
     }
@@ -156,46 +188,8 @@ pub fn resample(audio: &Tensor, from_rate: u32, to_rate: u32) -> Result<Tensor> 
 }
 
 #[deprecated(note = "Use resample() instead which provides higher quality.")]
-pub fn resample_linear(audio: &Tensor, from_rate: u32, to_rate: u32) -> Result<Tensor> {
+pub fn resample_linear(audio: &Tensor, from_rate: u32, to_rate: u32) -> anyhow::Result<Tensor> {
     resample(audio, from_rate, to_rate)
-}
-
-pub fn read_wav_from_bytes(bytes: &[u8]) -> Result<(Tensor, u32)> {
-    let cursor = std::io::Cursor::new(bytes);
-    let mut reader = WavReader::new(cursor).map_err(|e| candle_core::Error::Msg(e.to_string()))?;
-    let spec = reader.spec();
-    let samples: Vec<f32> = match spec.sample_format {
-        hound::SampleFormat::Float => reader
-            .samples::<f32>()
-            .map(|s| s.map_err(|e| anyhow::anyhow!(e)))
-            .collect::<Result<Vec<f32>>>()?,
-        hound::SampleFormat::Int => {
-            let max_val = 2u32.pow(spec.bits_per_sample as u32 - 1) as f32;
-            reader
-                .samples::<i32>()
-                .map(|s| {
-                    s.map(|v| v as f32 / max_val)
-                        .map_err(|e| anyhow::anyhow!(e))
-                })
-                .collect::<Result<Vec<f32>>>()?
-        }
-    };
-
-    let duration = samples.len() / spec.channels as usize;
-    let data = Tensor::from_vec(
-        samples,
-        (spec.channels as usize, duration),
-        &candle_core::Device::Cpu,
-    )?;
-
-    // Mix down to mono if necessary
-    let data = if spec.channels > 1 {
-        data.mean(0)?
-    } else {
-        data.flatten(0, 1)?
-    };
-
-    Ok((data, spec.sample_rate))
 }
 
 #[cfg(test)]
@@ -204,7 +198,7 @@ mod tests {
     use candle_core::{Device, Tensor};
 
     #[test]
-    fn test_normalize_peak() -> Result<()> {
+    fn test_normalize_peak() -> anyhow::Result<()> {
         let device = Device::Cpu;
         let t = Tensor::from_vec(vec![-0.5f32, 0.2, 0.5], (1, 3), &device)?;
         let normalized = normalize_peak(&t)?;
@@ -214,7 +208,8 @@ mod tests {
     }
 
     #[test]
-    fn test_resample() -> Result<()> {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn test_resample() -> anyhow::Result<()> {
         let device = Device::Cpu;
         // rubato works best with reasonable block sizes.
         // Let's use a larger sample count to be safe.
@@ -242,7 +237,8 @@ mod tests {
     }
 
     #[test]
-    fn test_wav_io() -> Result<()> {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn test_wav_io() -> anyhow::Result<()> {
         let device = Device::Cpu;
         // Use small values to avoid clipping
         // write_wav applies clamp(-1, 1) to match Python's behavior
