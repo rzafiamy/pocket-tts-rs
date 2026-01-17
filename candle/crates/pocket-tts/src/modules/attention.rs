@@ -73,8 +73,17 @@ impl StreamingMultiheadAttention {
 
         // Auto-initialize state if missing
         if !model_state.contains_key(&self.name) {
-            // Estimate sequence length as t * 100 for KV cache (conservative)
-            let init = self.init_state(b, t * 100, query.device())?;
+            // Heuristic for KV cache size:
+            // If t is small (generation/streaming), reserve space for future tokens (e.g. 100x).
+            // If t is large (prompt processing), reserve just enough plus a small buffer.
+            // This prevents allocating 100x memory for long audio prompts (e.g., 100 * 10MB = 1GB).
+            let capacity = if t > 100 {
+                t + 2048 // Prompt + reasonable generation buffer
+            } else {
+                t * 100 // Short start, expect generation
+            };
+
+            let init = self.init_state(b, capacity, query.device())?;
             model_state.insert(self.name.clone(), init);
         }
 
@@ -137,19 +146,28 @@ impl StreamingMultiheadAttention {
             Tensor::cat(&[v_prev, v.clone()], 1)?
         };
 
-        let attn_weights = (q
-            .transpose(1, 2)?
-            .matmul(&k_state.transpose(1, 2)?.transpose(2, 3)?)?
-            / (d as f64).sqrt())?;
+        // Compute attention using memory-efficient tiled implementation
+        let q_t = q.transpose(1, 2)?;
+        let k_t = k_state.transpose(1, 2)?;
+        let v_t = v_state.transpose(1, 2)?;
 
-        // Handle causal mask
-        let (num_queries, num_keys) = (t, current_end + t);
-        let mask = get_causal_mask(num_queries, num_keys, self.context, q.device())?;
-        let attn_weights = attn_weights.broadcast_add(&mask)?;
+        let scale = 1.0 / (d as f64).sqrt();
 
-        let attn_probs = candle_nn::ops::softmax(&attn_weights, candle_core::D::Minus1)?;
+        // Output: [B, H, T, D]
+        // We pass is_causal=true (since it's a streaming/causal model) and the context window.
+        // The sdpa function handles on-the-fly mask generation per tile.
+        let x = crate::modules::sdpa::sdpa(
+            &q_t,
+            &k_t,
+            &v_t,
+            scale,
+            true,         // is_causal
+            self.context, // context_window
+        )?;
 
-        let x = attn_probs.matmul(&v_state.transpose(1, 2)?)?;
+        // Transpose back to [B, T, H, D] for output projection
+        // let x = x.transpose(1, 2)?.reshape((b, t, self.embed_dim))?; -- this is done in next lines usually
+
         let x = x.transpose(1, 2)?.reshape((b, t, self.embed_dim))?;
         let x = self.out_proj.forward(&x)?;
 
@@ -163,49 +181,4 @@ impl StreamingMultiheadAttention {
 
         Ok(x)
     }
-}
-
-pub fn get_causal_mask(
-    q_len: usize,
-    k_len: usize,
-    context: Option<usize>,
-    device: &candle_core::Device,
-) -> Result<Tensor> {
-    let mask: Vec<f32> = (0..q_len)
-        .flat_map(|i| {
-            (0..k_len).map(move |j| {
-                // causal
-                let is_future = j > i + (k_len - q_len);
-                // context
-                let is_out_of_context = if let Some(ctx) = context {
-                    // pos_q = i + (k_len - q_len)  (shift = k_len - q_len)
-                    // pos_k = j
-                    // delta = pos_q - pos_k
-                    // we want delta < ctx => pos_k > pos_q - ctx
-                    // so if pos_k <= pos_q - ctx, it's out of context
-                    let pos_q = i + (k_len - q_len);
-                    // use isize to handle negative indexing potentially, or just check bounds
-                    // pos_q >= ctx for subtraction to be safe?
-                    if pos_q >= ctx {
-                        j <= pos_q - ctx
-                    } else {
-                        false // pos_q < ctx, so pos_q - ctx would be negative. j is unsigned (>=0).
-                        // If pos_q - ctx < 0 covers everything? No, we want j > pos_q - ctx.
-                        // pos_q - k < context => k > pos_q - context
-                        // If pos_q (e.g. 2) < context (4), then 2 - k < 4 => k > -2. True for all k>=0.
-                        // So nothing is out of context.
-                    }
-                } else {
-                    false
-                };
-
-                if is_future || is_out_of_context {
-                    f32::NEG_INFINITY
-                } else {
-                    0.0
-                }
-            })
-        })
-        .collect();
-    Tensor::from_vec(mask, (1, 1, q_len, k_len), device)
 }

@@ -1,9 +1,10 @@
 use candle_core::Tensor;
 
-use hound::WavReader;
+use hound::{Error as HoundError, WavReader};
 #[cfg(not(target_arch = "wasm32"))]
 use hound::{WavSpec, WavWriter};
 
+use std::io;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
@@ -28,14 +29,50 @@ fn read_wav_internal<R: std::io::Read + std::io::Seek>(
     let samples: Vec<f32> = match spec.sample_format {
         hound::SampleFormat::Int => {
             let max_val = (1 << (spec.bits_per_sample - 1)) as f32;
-            reader
-                .samples::<i32>()
-                .map(|s| s.map(|v| v as f32 / max_val))
-                .collect::<std::result::Result<Vec<_>, _>>()?
+            let mut samples = Vec::new();
+            for s in reader.samples::<i32>() {
+                match s {
+                    Ok(v) => samples.push(v as f32 / max_val),
+                    Err(e) => {
+                        // If we hit an unexpected EOF but have read valid samples, we accept it.
+                        if let HoundError::IoError(ref io_err) = e {
+                            // Check for UnexpectedEof OR "Failed to read enough bytes" (which is Other in standard hound)
+                            let is_unexpected_eof = io_err.kind() == io::ErrorKind::UnexpectedEof;
+                            // Check string representation for the specific hound error message
+                            let is_truncated_msg = io_err.kind() == io::ErrorKind::Other
+                                && io_err.to_string().contains("enough bytes");
+
+                            if (is_unexpected_eof || is_truncated_msg) && !samples.is_empty() {
+                                break;
+                            }
+                        }
+                        return Err(anyhow::Error::from(e));
+                    }
+                }
+            }
+            samples
         }
-        hound::SampleFormat::Float => reader
-            .samples::<f32>()
-            .collect::<std::result::Result<Vec<_>, _>>()?,
+        hound::SampleFormat::Float => {
+            let mut samples = Vec::new();
+            for s in reader.samples::<f32>() {
+                match s {
+                    Ok(v) => samples.push(v),
+                    Err(e) => {
+                        if let HoundError::IoError(ref io_err) = e {
+                            let is_unexpected_eof = io_err.kind() == io::ErrorKind::UnexpectedEof;
+                            let is_truncated_msg = io_err.kind() == io::ErrorKind::Other
+                                && io_err.to_string().contains("enough bytes");
+
+                            if (is_unexpected_eof || is_truncated_msg) && !samples.is_empty() {
+                                break;
+                            }
+                        }
+                        return Err(anyhow::Error::from(e));
+                    }
+                }
+            }
+            samples
+        }
     };
 
     let device = if cfg!(target_arch = "wasm32") {

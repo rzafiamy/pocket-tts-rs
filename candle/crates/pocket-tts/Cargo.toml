@@ -55,6 +55,8 @@ harness = false
 
 [dev-dependencies]
 criterion = "0.8.1"
+candle-core.workspace = true
+anyhow.workspace = true
 [[bench]]
 name = "full_benchmark"
 harness = false

@@ -465,8 +465,19 @@ impl TTSModel {
             audio.clone()
         };
 
-        // Encode audio through Mimi
-        let encoded = self.mimi.encode_to_latent(&audio, &mut model_state)?;
+        // Encode audio through Mimi in chunks to avoid OOM in SEANet Conv1d layers
+        // (A 5-minute audio at 24kHz creates ~1GB feature maps if processed at once)
+        let chunk_size = frame_size * 100; // ~100 frames per chunk (reduced from 500 to safe mem)
+        let mut encoded_chunks = Vec::new();
+        let (_b, _c, total_samples) = audio.dims3()?;
+
+        for start in (0..total_samples).step_by(chunk_size) {
+            let end = std::cmp::min(start + chunk_size, total_samples);
+            let chunk = audio.narrow(2, start, end - start)?;
+            let code = self.mimi.encode_to_latent(&chunk, &mut model_state)?;
+            encoded_chunks.push(code);
+        }
+        let encoded = Tensor::cat(&encoded_chunks, 2)?;
 
         // Transpose from [B, D, T] to [B, T, D]
         let latents = encoded.transpose(1, 2)?.to_dtype(DType::F32)?;
@@ -486,6 +497,8 @@ impl TTSModel {
     }
 
     /// Run flow LM with audio conditioning (used during prompting)
+
+    /// Run flow LM with audio conditioning (used during prompting)
     fn run_flow_lm_prompt(&self, conditioning: &Tensor, state: &mut ModelState) -> Result<()> {
         // Empty text tokens and backbone input
         let empty_text = Tensor::zeros((1, 0), DType::I64, &self.device)?;
@@ -496,6 +509,7 @@ impl TTSModel {
         let input = Tensor::cat(&[&text_embeddings, conditioning], 1)?;
 
         // Run through transformer (no generation, just prompting)
+        // With custom SDPA, this is now memory efficient
         let _ = self.flow_lm.transformer.forward(&input, state)?;
 
         // Increment FlowLM state after prompting (critical for RoPE positioning)
@@ -504,6 +518,62 @@ impl TTSModel {
         increment_steps(state, "offset", increment_by);
 
         Ok(())
+    }
+
+    /// Split text into optimal sentences for generation, matching Python's logic
+    /// to avoid long pre-fill sequences.
+    pub fn split_into_best_sentences(&self, text: &str) -> Vec<String> {
+        // This is a simplified port of Python's split_into_best_sentences
+        // that relies on the tokenizer to count tokens.
+        // Python uses ~50 tokens per chunk.
+
+        let mut chunks = Vec::new();
+        let prepared_text = prepare_text_prompt(text);
+
+        // Split by naive punctuation first
+        let sentences: Vec<String> = prepared_text
+            .split_inclusive(&['.', '!', '?', ';', ':'])
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        if sentences.is_empty() {
+            return vec![prepared_text];
+        }
+
+        let max_tokens = 50;
+        let mut current_chunk = String::new();
+        let mut current_tokens = 0;
+
+        for sentence in sentences {
+            // Rough token estimate (chars / 3) or use tokenizer if cheap.
+            // Using whitespace split as proxy for now to avoid calling tokenizer repeatedly in loop
+            // (which requires device interaction potentially).
+            // A word is roughly 1.3 tokens.
+            let estimated_tokens = (sentence.split_whitespace().count() as f32 * 1.3) as usize;
+
+            if current_chunk.is_empty() {
+                current_chunk = sentence;
+                current_tokens = estimated_tokens;
+                continue;
+            }
+
+            if current_tokens + estimated_tokens > max_tokens {
+                chunks.push(current_chunk);
+                current_chunk = sentence;
+                current_tokens = estimated_tokens;
+            } else {
+                current_chunk.push(' ');
+                current_chunk.push_str(&sentence);
+                current_tokens += estimated_tokens;
+            }
+        }
+
+        if !current_chunk.is_empty() {
+            chunks.push(current_chunk);
+        }
+
+        chunks
     }
 
     /// Generate audio from text with voice state
@@ -684,20 +754,8 @@ impl TTSModel {
         text: &str,
         voice_state: &'a ModelState,
     ) -> impl Iterator<Item = Result<Tensor>> + 'a {
-        // Simple segmentation by sentence endings
-        // This is a basic implementation; robust NLP segmentation would be better but requires more dependencies
-        let segments: Vec<String> = text
-            .split_inclusive(&['.', '!', '?'])
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-
-        // If no punctuation found, treat entire text as one segment
-        let segments = if segments.is_empty() && !text.trim().is_empty() {
-            vec![text.trim().to_string()]
-        } else {
-            segments
-        };
+        // Use the Python-parity splitting logic that respects token counts
+        let segments = self.split_into_best_sentences(text);
 
         let model = self; // Capture self
         // We capture the reference 'voice_state'. It lives as long as 'a.
