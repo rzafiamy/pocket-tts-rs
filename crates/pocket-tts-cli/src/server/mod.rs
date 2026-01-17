@@ -40,16 +40,12 @@ pub async fn start_server(args: ServeArgs) -> Result<()> {
         )?
     };
 
-    println!(
-        "  {} Model loaded (sample rate: {}Hz)",
-        "✓".to_string(),
-        model.sample_rate
-    );
+    println!("  ✓ Model loaded (sample rate: {}Hz)", model.sample_rate);
 
     // Pre-load default voice
     println!("  Loading default voice: {}...", args.voice);
     let default_voice_state = resolve_voice(&model, Some(&args.voice))?;
-    println!("  {} Default voice ready", "✓");
+    println!("  ✓ Default voice ready");
 
     let state = state::AppState::new(model, default_voice_state);
     let app = routes::create_router(state);

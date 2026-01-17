@@ -225,10 +225,7 @@ pub async fn generate_stream(
     let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
     let body_stream = stream.map(|res| match res {
         Ok(bytes) => Ok(axum::body::Bytes::from(bytes)),
-        Err(e) => Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            e.to_string(),
-        )),
+        Err(e) => Err(std::io::Error::other(e.to_string())),
     });
 
     Response::builder()
@@ -277,9 +274,8 @@ pub async fn tts_form(State(state): State<AppState>, mut multipart: Multipart) -
     };
 
     // Determine voice
-    let voice = if voice_wav_bytes.is_some() {
+    let voice = if let Some(bytes) = voice_wav_bytes {
         // Use uploaded WAV - encode as base64 for our resolver
-        let bytes = voice_wav_bytes.unwrap();
         use base64::{Engine as _, engine::general_purpose};
         Some(format!(
             "data:audio/wav;base64,{}",

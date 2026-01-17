@@ -497,8 +497,6 @@ impl TTSModel {
     }
 
     /// Run flow LM with audio conditioning (used during prompting)
-
-    /// Run flow LM with audio conditioning (used during prompting)
     fn run_flow_lm_prompt(&self, conditioning: &Tensor, state: &mut ModelState) -> Result<()> {
         // Empty text tokens and backbone input
         let empty_text = Tensor::zeros((1, 0), DType::I64, &self.device)?;
@@ -618,7 +616,7 @@ impl TTSModel {
 
         // Generate audio for clean text
         let audio = self.generate(&parsed.clean_text, voice_state)?;
-        let (channels, samples) = audio.dims2()?;
+        let (channels, _samples) = audio.dims2()?;
 
         // Calculate total silence to insert
         let mut total_pause_samples = 0usize;
@@ -626,24 +624,23 @@ impl TTSModel {
             total_pause_samples += silence_samples(pause.duration_ms, self.sample_rate as u32);
         }
 
-        // Create output tensor with space for pauses
-        let output_samples = samples + total_pause_samples;
-        let mut output_data = vec![0.0f32; channels * output_samples];
+        if total_pause_samples == 0 {
+            return Ok(audio);
+        }
 
-        // Get audio data
-        let audio_data: Vec<f32> = audio.to_vec1()?;
+        // Create silence tensor
+        let silence = Tensor::zeros(
+            (channels, total_pause_samples),
+            audio.dtype(),
+            audio.device(),
+        )?;
 
-        // Copy audio with pauses inserted
+        // Concatenate audio and silence
         // For simplicity, we insert all pauses at the end for now
         // TODO: Calculate proper insertion points based on character-to-sample mapping
-        output_data[..audio_data.len()].copy_from_slice(&audio_data);
-        // Silence samples are already zero, no need to fill
+        let output = Tensor::cat(&[&audio, &silence], 1)?;
 
-        Ok(Tensor::from_vec(
-            output_data,
-            (channels, output_samples),
-            &self.device,
-        )?)
+        Ok(output)
     }
 
     /// Generate audio stream from text with voice state
@@ -800,7 +797,11 @@ fn find_config_path(variant: &str) -> Result<std::path::PathBuf> {
         }
 
         // Also try new crates structure if running from cli
-        let crates_config = current.join("crates").join("pocket-tts").join("config").join(&filename);
+        let crates_config = current
+            .join("crates")
+            .join("pocket-tts")
+            .join("config")
+            .join(&filename);
         if crates_config.exists() {
             return Ok(crates_config);
         }

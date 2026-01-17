@@ -194,7 +194,13 @@ fn test_mimi_encode_decode_roundtrip() {
 // #[ignore = "requires HF_TOKEN and model download"]
 fn test_generate_with_pauses_adds_silence() {
     use pocket_tts::TTSModel;
-    let model = TTSModel::load("b6369a24").expect("Failed to load model");
+    let model = TTSModel::load_with_params(
+        "b6369a24",
+        0.0,
+        pocket_tts::config::defaults::LSD_DECODE_STEPS,
+        pocket_tts::config::defaults::EOS_THRESHOLD,
+    )
+    .expect("Failed to load model");
 
     let ref_wav_path = get_ref_wav_path();
     if !ref_wav_path.exists() {
@@ -206,33 +212,36 @@ fn test_generate_with_pauses_adds_silence() {
         .get_voice_state(&ref_wav_path)
         .expect("Failed to get voice state");
 
-    // Generate without pauses
-    let audio_no_pause = model
-        .generate("Hello world.", &voice_state)
-        .expect("Failed to generate audio");
-
     // Generate with pause (should be longer due to silence)
+    let text_with_pause = "Hello [pause:500ms] world.";
     let audio_with_pause = model
-        .generate_with_pauses("Hello [pause:500ms] world.", &voice_state)
+        .generate_with_pauses(text_with_pause, &voice_state)
         .expect("Failed to generate audio with pauses");
 
-    let no_pause_samples = audio_no_pause.dims()[1];
+    // Get the clean text and generate audio for it directly
+    let clean_text = pocket_tts::pause::strip_pause_markers(text_with_pause);
+    let audio_base = model
+        .generate(&clean_text, &voice_state)
+        .expect("Failed to generate audio base");
+
+    let no_pause_samples = audio_base.dims()[1];
     let with_pause_samples = audio_with_pause.dims()[1];
 
-    // Audio with pause should be longer (500ms = 12000 samples at 24kHz)
+    // Audio with pause should be exactly 500ms longer (12000 samples at 24kHz)
     let expected_extra_samples = 12000;
+    let diff = with_pause_samples.saturating_sub(no_pause_samples);
+
     assert!(
-        with_pause_samples > no_pause_samples,
-        "Audio with pause should be longer: {} vs {}",
-        with_pause_samples,
-        no_pause_samples
+        diff >= expected_extra_samples,
+        "Audio with pause should be at least {} samples longer, got {}",
+        expected_extra_samples,
+        diff
     );
 
-    // Should be approximately 500ms longer
-    let diff = with_pause_samples - no_pause_samples;
+    // Should be very close to the expected extra
     assert!(
-        diff >= expected_extra_samples - 1000 && diff <= expected_extra_samples + 1000,
-        "Pause duration incorrect: got {} samples, expected ~{}",
+        diff <= expected_extra_samples + 10,
+        "Pause duration too long: got {} samples, expected ~{}",
         diff,
         expected_extra_samples
     );
