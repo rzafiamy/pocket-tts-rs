@@ -23,8 +23,12 @@ jobs:
         run: cargo fmt --all -- --check
 
   clippy:
-    name: Clippy
-    runs-on: ubuntu-latest
+    name: Clippy (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
     steps:
@@ -40,12 +44,20 @@ jobs:
           cd crates/pocket-tts-cli/web
           bun install
           bun run build
-      - name: Run clippy
+      - name: Run clippy (Linux/Windows)
+        if: matrix.os != 'macos-latest'
         run: cargo clippy --all-targets --features quantized -- -D warnings
+      - name: Run clippy (macOS)
+        if: matrix.os == 'macos-latest'
+        run: cargo clippy --all-targets --features "quantized metal" -- -D warnings
 
   test:
-    name: Test
-    runs-on: ubuntu-latest
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
     steps:
@@ -59,5 +71,9 @@ jobs:
           cd crates/pocket-tts-cli/web
           bun install
           bun run build
-      - name: Run tests (release)
+      - name: Run tests (Linux/Windows)
+        if: matrix.os != 'macos-latest'
         run: cargo test --release --all --features quantized
+      - name: Run tests (macOS)
+        if: matrix.os == 'macos-latest'
+        run: cargo test --release --all --features "quantized metal"
