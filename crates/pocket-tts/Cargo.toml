@@ -33,7 +33,6 @@ serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
 byteorder.workspace = true
-tokenizers = { workspace = true, features = ["fancy-regex"] }
 lenient_semver = "0.4.2"
 rubato = "0.14.1"
 regex = "1"
@@ -45,7 +44,6 @@ rayon = "1.11.0"
 # Dependencies for non-WASM, non-macOS targets (Linux, Windows)
 [target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "macos")))'.dependencies]
 hf-hub = { workspace = true, features = ["default-tls", "tokio"] }
-tokenizers = { workspace = true, features = ["onig", "progressbar", "http"] }
 intel-mkl-src.workspace = true
 memmap2.workspace = true
 sentencepiece = "0.13"
@@ -53,12 +51,12 @@ sentencepiece = "0.13"
 # Dependencies for macOS (non-WASM)
 [target.'cfg(all(not(target_arch = "wasm32"), target_os = "macos"))'.dependencies]
 hf-hub = { workspace = true, features = ["native-tls", "tokio"] }
-tokenizers = { workspace = true, features = ["onig", "progressbar", "http"] }
 memmap2.workspace = true
 sentencepiece = "0.13"
 
 # WASM-specific dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+tokenizers = { workspace = true, features = ["fancy-regex"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
