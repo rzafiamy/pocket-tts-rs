@@ -22,7 +22,7 @@ candle-core = "0.9.1"
 candle-nn = "0.9.1"
 candle-transformers = "0.9.1"
 safetensors = "0.5.2"
-hf-hub = "0.4.1"
+hf-hub = "0.4.3"
 anyhow = "1.0"
 thiserror = "2.0"
 hound = "3.5"
@@ -32,7 +32,7 @@ serde_yaml = "0.9"
 byteorder = "1.5"
 memmap2 = "0.9"
 clap = { version = "4.5", features = ["derive"] }
-tokenizers = { version = "0.21", default-features = false }
+tokenizers = { version = "0.21.0", default-features = false }
 axum = "0.7"
 tokio = "1.0"
 tower = "0.4"
