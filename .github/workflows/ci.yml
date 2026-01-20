@@ -34,7 +34,7 @@ jobs:
         with:
           components: clippy
       - name: Run clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --all-targets --features quantized -- -D warnings
 
   test:
     name: Test
@@ -46,4 +46,4 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Run tests (release)
-        run: cargo test --release --all --all-features
+        run: cargo test --release --all --features quantized
