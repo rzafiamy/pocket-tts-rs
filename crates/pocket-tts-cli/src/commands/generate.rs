@@ -112,13 +112,7 @@ pub fn run(args: GenerateArgs) -> Result<()> {
     // Load model
     info!(quiet, "{} Loading model...", "▶".cyan());
 
-    let is_voice_cloning = args
-        .voice
-        .as_ref()
-        .is_some_and(|v| v.ends_with(".wav") || v.starts_with("data:audio/wav"));
-
-    // If voice cloning, we default to quantized=true if not explicitly set
-    let quantized = args.quantized || is_voice_cloning;
+    let quantized = args.quantized;
 
     let model = if quantized {
         #[cfg(feature = "quantized")]
