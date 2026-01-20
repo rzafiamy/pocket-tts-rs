@@ -665,6 +665,157 @@ impl TTSModel {
         Ok(audio)
     }
 
+    // =========================================================================
+    // EXPERIMENTAL: Parallel FlowLM + Mimi decoding
+    // =========================================================================
+    //
+    // This method was an experiment to decode Mimi audio in a separate thread
+    // while FlowLM generates the next latent. However, benchmarks showed it's
+    // ~21% SLOWER than sequential due to:
+    // - Thread spawning and channel synchronization overhead
+    // - CPU contention (MKL already parallelizes internally)
+    // - Bounded channel backpressure when Mimi can't keep up
+    //
+    // Keeping this commented out for future exploration with GPU acceleration
+    // where FlowLM and Mimi could run on different hardware.
+    //
+    // To re-enable: uncomment the method below and test with:
+    //   model.generate_parallel(text, &voice_state)
+    //
+    /*
+    /// Generate audio with parallel FlowLM + Mimi decoding
+    ///
+    /// Uses std::thread to decode Mimi audio in parallel with FlowLM generation.
+    /// While Mimi decodes frame N, FlowLM generates frame N+1.
+    ///
+    /// NOTE: Currently slower than sequential due to thread overhead on CPU.
+    /// May be useful for GPU acceleration in the future.
+    pub fn generate_parallel(&self, text: &str, voice_state: &ModelState) -> Result<Tensor> {
+        use std::sync::mpsc;
+        use std::thread;
+
+        // Channel for sending latents from FlowLM to Mimi decoder
+        let (latent_tx, latent_rx) = mpsc::sync_channel::<Option<(Tensor, usize)>>(4);
+        // Channel for receiving decoded audio from Mimi
+        let (audio_tx, audio_rx) = mpsc::channel::<Result<Tensor>>();
+
+        // Clone what the decoder thread needs
+        let mimi = self.mimi.clone();
+        let emb_mean = self.flow_lm.emb_mean.clone();
+        let emb_std = self.flow_lm.emb_std.clone();
+
+        // Spawn Mimi decoder thread
+        let decoder_handle = thread::spawn(move || {
+            let mut mimi_state = init_states(1, 1000);
+
+            while let Ok(Some((next_latent, step))) = latent_rx.recv() {
+                let result = (|| -> Result<Tensor> {
+                    let next_latent_denorm = next_latent
+                        .broadcast_mul(&emb_std)?
+                        .broadcast_add(&emb_mean)?;
+
+                    let mimi_input = next_latent_denorm.unsqueeze(1)?.transpose(1, 2)?;
+                    let quantized = mimi.quantize(&mimi_input)?;
+                    let audio = mimi
+                        .decode_from_latent(&quantized, &mut mimi_state, step)
+                        .map_err(|e| anyhow::anyhow!(e))?;
+
+                    Ok(audio)
+                })();
+
+                if audio_tx.send(result).is_err() {
+                    break; // Receiver dropped
+                }
+            }
+        });
+
+        // Main thread: generate latents with FlowLM
+        let chunks = self.split_into_best_sentences(text);
+        let mut expected_frames = 0;
+
+        for chunk_text in chunks {
+            let mut state = voice_state.clone();
+            let prepared_text = prepare_text_prompt(&chunk_text);
+
+            let tokens = self.conditioner.prepare(&prepared_text, &self.device)?;
+            let text_embeddings = self.conditioner.forward(&tokens)?;
+
+            // Initial text prompt
+            self.flow_lm
+                .transformer
+                .forward(&text_embeddings, &mut state, 0)?;
+
+            let max_gen_len = (prepared_text.split_whitespace().count() + 2) * 13;
+            let frames_after_eos = estimate_frames_after_eos(&chunk_text);
+
+            let mut backbone_input = self.flow_lm.bos_emb.clone().reshape((1, 1, self.ldim))?;
+            let mut eos_step: Option<usize> = None;
+
+            let time_embeddings = self.flow_lm.flow_net.compute_time_embeddings(
+                self.lsd_decode_steps,
+                &self.device,
+                DType::F32,
+            )?;
+
+            let empty_text_embeddings = Tensor::zeros((1, 0, self.dim), DType::F32, &self.device)?;
+
+            for step in 0..max_gen_len {
+                let (next_latent, is_eos) = self.flow_lm.forward(
+                    &backbone_input,
+                    &empty_text_embeddings,
+                    &mut state,
+                    &time_embeddings,
+                    self.temp,
+                    self.eos_threshold,
+                    step,
+                )?;
+
+                // Send latent to decoder thread (non-blocking with bounded channel)
+                if latent_tx.send(Some((next_latent.clone(), step))).is_err() {
+                    break;
+                }
+                expected_frames += 1;
+
+                if is_eos && eos_step.is_none() {
+                    eos_step = Some(step);
+                }
+
+                if let Some(e_step) = eos_step {
+                    if step >= e_step + frames_after_eos {
+                        break;
+                    }
+                }
+
+                backbone_input = next_latent.unsqueeze(1)?;
+            }
+        }
+
+        // Signal decoder thread to finish
+        let _ = latent_tx.send(None);
+
+        // Collect all decoded audio frames
+        let mut audio_chunks = Vec::with_capacity(expected_frames);
+        for _ in 0..expected_frames {
+            match audio_rx.recv() {
+                Ok(Ok(frame)) => audio_chunks.push(frame),
+                Ok(Err(e)) => return Err(e),
+                Err(_) => break,
+            }
+        }
+
+        // Wait for decoder thread
+        let _ = decoder_handle.join();
+
+        if audio_chunks.is_empty() {
+            anyhow::bail!("No audio generated");
+        }
+
+        let audio = Tensor::cat(&audio_chunks, 2)?;
+        let audio = audio.squeeze(0)?;
+        Ok(audio)
+    }
+    */
+
     /// Generate audio from text with pause handling
     ///
     /// This method parses pause markers in the text and inserts silence
