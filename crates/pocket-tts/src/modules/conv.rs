@@ -3,6 +3,7 @@ use candle_core::{DType, Result, Tensor};
 use candle_nn::{Conv1d, Conv1dConfig, ConvTranspose1d, ConvTranspose1dConfig, Module, VarBuilder};
 use std::collections::HashMap;
 
+#[derive(Clone)]
 pub struct StreamingConv1d {
     conv: Conv1d,
     padding_mode: String,
@@ -82,21 +83,17 @@ impl StreamingConv1d {
                 device,
             )?;
             state.insert("previous".to_string(), previous);
-            state.insert(
-                "first".to_string(),
-                Tensor::ones((batch_size,), DType::U8, device)?,
-            );
         }
         Ok(state)
     }
 
-    pub fn forward(&self, x: &Tensor, model_state: &mut ModelState) -> Result<Tensor> {
-        let (b, _c, t) = x.dims3()?;
+    pub fn forward(&self, x: &Tensor, model_state: &mut ModelState, step: usize) -> Result<Tensor> {
+        let (b, c, t) = x.dims3()?;
         let s = self.stride;
         if t == 0 || t % s != 0 {
             return Err(candle_core::Error::Msg(format!(
-                "Steps must be multiple of stride, got {}",
-                t
+                "Steps must be multiple of stride {}, got {}",
+                s, t
             )));
         }
 
@@ -107,42 +104,34 @@ impl StreamingConv1d {
         }
 
         let module_state = model_state.get_mut(&self.name).unwrap();
+        let kernel = self.effective_kernel_size();
+        let pad_left = kernel.saturating_sub(s);
 
-        let previous = module_state.get("previous").cloned();
-        let first = module_state.get("first").cloned();
+        if pad_left > 0 {
+            let previous = module_state
+                .remove("previous")
+                .ok_or_else(|| candle_core::Error::Msg("previous state not found".to_string()))?;
+            let is_first = step == 0;
 
-        let mut x = x.clone();
-        if let Some(prev) = previous {
-            let tp = prev.dims()[2];
-            if tp > 0 {
-                if let (Some(f), "replicate") = (first, self.padding_mode.as_str()) {
-                    let is_first = f.to_vec1::<u8>()?[0] == 1;
-                    if is_first {
-                        let init = x.narrow(2, 0, 1)?;
-                        let new_prev = init.broadcast_as(prev.shape())?;
-                        module_state.insert("previous".to_string(), new_prev.clone());
-                    }
-                }
-                // Re-get from module_state because it might have been updated
-                x = Tensor::cat(&[module_state.get("previous").unwrap(), &x], 2)?;
-            }
+            let x_with_padding = if is_first && self.padding_mode == "replicate" {
+                // Replicate the first frame for the initial padding
+                let first_frame = x.narrow(2, 0, 1)?;
+                let replicated_padding = first_frame.broadcast_as((b, c, pad_left))?;
+                Tensor::cat(&[replicated_padding, x.clone()], 2)?
+            } else {
+                Tensor::cat(&[previous, x.clone()], 2)?
+            };
 
-            let y = self.conv.forward(&x)?;
-            let tp = prev.dims()[2];
-            if tp > 0 {
-                let new_prev = x.narrow(2, x.dims()[2] - tp, tp)?;
-                module_state.insert("previous".to_string(), new_prev);
-                if self.padding_mode == "replicate" {
-                    module_state.insert(
-                        "first".to_string(),
-                        Tensor::zeros((1,), DType::U8, x.device())?,
-                    );
-                }
-            }
+            let y = self.conv.forward(&x_with_padding)?;
+
+            // Update previous state for next call
+            let total_len = x_with_padding.dims()[2];
+            let new_previous = x_with_padding.narrow(2, total_len - pad_left, pad_left)?;
+            module_state.insert("previous".to_string(), new_previous);
+
             Ok(y)
         } else {
-            let y = self.conv.forward(&x)?;
-            Ok(y)
+            self.conv.forward(x)
         }
     }
 
@@ -155,6 +144,7 @@ impl StreamingConv1d {
     }
 }
 
+#[derive(Clone)]
 pub struct StreamingConvTranspose1d {
     convtr: ConvTranspose1d,
     stride: usize,
@@ -229,9 +219,13 @@ impl StreamingConvTranspose1d {
     pub fn forward(
         &self,
         x: &Tensor,
-        model_state: &mut HashMap<String, HashMap<String, Tensor>>,
+        model_state: &mut ModelState,
+        _step: usize,
     ) -> Result<Tensor> {
         let (b, _c, t) = x.dims3()?;
+        let k = self.kernel_size;
+        let s = self.stride;
+        let trim = k.saturating_sub(s);
 
         // Auto-initialize state if missing
         if !model_state.contains_key(&self.name) {
@@ -243,28 +237,30 @@ impl StreamingConvTranspose1d {
 
         let mut y = self.convtr.forward(x)?;
 
-        if let Some(partial) = module_state.get("partial") {
-            let pt = partial.dims()[2];
-            if pt > 0 {
-                // y[..., :PT] += layer_state
-                let y_start = y.narrow(2, 0, pt)?;
-                let y_sum = (y_start + partial)?;
-                // Patch y (Candle doesn't have in-place slice addition, so we cat)
-                let y_end = y.narrow(2, pt, y.dims()[2] - pt)?;
-                y = Tensor::cat(&[y_sum, y_end], 2)?;
-
-                // for_partial = y[..., -PT:]
-                let mut for_partial = y.narrow(2, y.dims()[2] - pt, pt)?;
-                // if bias is not None: for_partial -= bias[:, None]
-                if let Some(bias) = self.convtr.bias() {
-                    for_partial =
-                        for_partial.broadcast_sub(&bias.reshape((self.out_channels, 1))?)?;
-                }
-                module_state.insert("partial".to_string(), for_partial);
-
-                // y = y[..., :-PT]
-                y = y.narrow(2, 0, y.dims()[2] - pt)?;
+        if trim > 0 {
+            if let Some(partial) = module_state.remove("partial") {
+                // y is (B, C, S*T + trim)
+                // We add partial to the start of y
+                let y_head = y.narrow(2, 0, trim)?;
+                let y_sum = (y_head + partial)?;
+                let y_tail = y.narrow(2, trim, y.dims()[2] - trim)?;
+                y = Tensor::cat(&[y_sum, y_tail], 2)?;
             }
+
+            // The last `trim` elements of `y` become the next `partial`
+            let len = y.dims()[2];
+            let mut next_partial = y.narrow(2, len - trim, trim)?;
+
+            // If bias exists, we need to subtract it from the partial state
+            // because it will be added again when we run the next forward pass.
+            if let Some(bias) = self.convtr.bias() {
+                let b_reshaped = bias.reshape((self.out_channels, 1))?;
+                next_partial = next_partial.broadcast_sub(&b_reshaped)?;
+            }
+            module_state.insert("partial".to_string(), next_partial);
+
+            // The output we actually return is y MINUS the new partial tail
+            y = y.narrow(2, 0, len - trim)?;
         }
 
         Ok(y)
@@ -279,6 +275,7 @@ impl StreamingConvTranspose1d {
     }
 }
 
+#[derive(Clone)]
 pub struct ConvDownsample1d {
     conv: StreamingConv1d,
 }
@@ -309,11 +306,12 @@ impl ConvDownsample1d {
         self.conv.init_state(batch_size, sequence_length, device)
     }
 
-    pub fn forward(&self, x: &Tensor, model_state: &mut ModelState) -> Result<Tensor> {
-        self.conv.forward(x, model_state)
+    pub fn forward(&self, x: &Tensor, model_state: &mut ModelState, step: usize) -> Result<Tensor> {
+        self.conv.forward(x, model_state, step)
     }
 }
 
+#[derive(Clone)]
 pub struct ConvTrUpsample1d {
     convtr: StreamingConvTranspose1d,
 }
@@ -342,7 +340,7 @@ impl ConvTrUpsample1d {
         self.convtr.init_state(batch_size, sequence_length, device)
     }
 
-    pub fn forward(&self, x: &Tensor, model_state: &mut ModelState) -> Result<Tensor> {
-        self.convtr.forward(x, model_state)
+    pub fn forward(&self, x: &Tensor, model_state: &mut ModelState, step: usize) -> Result<Tensor> {
+        self.convtr.forward(x, model_state, step)
     }
 }

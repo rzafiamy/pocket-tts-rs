@@ -24,6 +24,7 @@ pub fn sdpa(
     is_causal: bool,
     context_window: Option<usize>,
 ) -> Result<Tensor> {
+    let q = q.contiguous()?;
     let (_b, _h, q_len, _dim) = q.dims4()?;
     let kv_len = k.dims()[2];
 
@@ -39,7 +40,12 @@ pub fn sdpa(
         // Naive path (no tiling)
         let scores = (q.matmul(&k_t)? * scale)?;
 
-        let scores = if is_causal || context_window.is_some() {
+        // Generate mask
+        // Optimization: If q_len (t) is 1 and it's causal, everything is visible,
+        // so we can skip mask generation.
+        // Even with a context window, the attention.rs logic now prunes the KV cache
+        // to that window, so we can skip the windowed mask here as well.
+        let scores = if is_causal && q_len > 1 {
             let mask = generate_mask_chunk(
                 0,
                 q_len,
@@ -103,7 +109,7 @@ pub fn sdpa(
     Tensor::cat(&outputs, 2)
 }
 
-/// Helper to generate a mask chunk for a specific query range
+/// Helper to generate a mask chunk for a specific query range using vectorized operations
 fn generate_mask_chunk(
     start_q: usize,
     num_q: usize,
@@ -113,47 +119,194 @@ fn generate_mask_chunk(
     context_window: Option<usize>,
     device: &candle_core::Device,
 ) -> Result<Tensor> {
-    let mask: Vec<f32> = (0..num_q)
-        .flat_map(|i_rel| {
-            let i_abs = start_q + i_rel;
-            (0..k_len).map(move |j| {
-                // Logic ported from attention.rs get_causal_mask
+    let shift = k_len.saturating_sub(total_q_len);
 
-                // Causal check
-                // "i" is absolute query index. "j" is key index.
-                // In streaming attention with cache:
-                // k_len = current_cache_len + num_new_tokens
-                // q_len = num_new_tokens
-                // The query "i" corresponds to position: i + (k_len - total_q_len)
-                // Wait, let's verify attention.rs logic:
-                // let is_future = j > i + (k_len - q_len);
-                // Here i is 0..q_len.
-                // So pos_q = i + (k_len - total_q_len).
-                // Future means pos_k > pos_q => j > i + (k_len - total_q_len).
+    // pos_q: [num_q, 1]
+    let pos_q = (Tensor::arange(0u32, num_q as u32, device)?
+        .to_dtype(candle_core::DType::F32)?
+        .affine(1.0, (start_q + shift) as f64)?
+        .reshape((num_q, 1)))?;
 
-                let shift = k_len.saturating_sub(total_q_len);
-                let pos_q = i_abs + shift;
+    // pos_k: [1, k_len]
+    let pos_k = Tensor::arange(0u32, k_len as u32, device)?
+        .to_dtype(candle_core::DType::F32)?
+        .reshape((1, k_len))?;
 
-                let is_future = is_causal && (j > pos_q);
+    let mut mask = Tensor::zeros((num_q, k_len), candle_core::DType::F32, device)?;
 
-                let is_out_of_context = if let Some(ctx) = context_window {
-                    if pos_q >= ctx {
-                        j <= pos_q - ctx
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                };
+    if is_causal {
+        let is_future = pos_k.broadcast_gt(&pos_q)?;
+        mask = is_future.where_cond(
+            &Tensor::full(f32::NEG_INFINITY, (num_q, k_len), device)?,
+            &mask,
+        )?;
+    }
 
-                if is_future || is_out_of_context {
-                    f32::NEG_INFINITY
-                } else {
-                    0.0
-                }
-            })
-        })
-        .collect();
+    if let Some(ctx) = context_window {
+        let limit = pos_q.broadcast_sub(&Tensor::full(ctx as f32, (num_q, 1), device)?)?;
+        let is_out = pos_k.broadcast_le(&limit)?;
+        mask = is_out.where_cond(
+            &Tensor::full(f32::NEG_INFINITY, (num_q, k_len), device)?,
+            &mask,
+        )?;
+    }
 
-    Tensor::from_vec(mask, (1, 1, num_q, k_len), device)
+    mask.reshape((1, 1, num_q, k_len))
+}
+
+/// Chunked version of SDPA that accepts a list of Key/Value pointers
+/// to avoid concatenating the full KV cache.
+pub fn sdpa_chunked(
+    q: &Tensor,
+    k_chunks: &[Tensor],
+    v_chunks: &[Tensor],
+    scale: f64,
+    is_causal: bool,
+    context_window: Option<usize>,
+) -> Result<Tensor> {
+    if k_chunks.is_empty() {
+        let (_b, h, _q, d) = q.dims4()?;
+        return Tensor::zeros((_b, h, _q, d), q.dtype(), q.device());
+    }
+
+    let device = q.device();
+    let dtype = q.dtype();
+    let q = q.contiguous()?;
+    let (b, h, q_len, d) = q.dims4()?;
+
+    // Fast path for single chunk
+    if k_chunks.len() == 1 {
+        let k_t = k_chunks[0].transpose(2, 3)?;
+        let scores = (q.matmul(&k_t)? * scale)?;
+
+        let masked_scores = if is_causal || context_window.is_some() {
+            if q_len == 1 && context_window.is_none() {
+                scores
+            } else {
+                let mask = generate_mask_chunk(
+                    0,
+                    q_len,
+                    k_chunks[0].dims()[2],
+                    q_len,
+                    is_causal,
+                    context_window,
+                    device,
+                )?;
+                scores.broadcast_add(&mask)?
+            }
+        } else {
+            scores
+        };
+
+        let probs = candle_nn::ops::softmax(&masked_scores, D::Minus1)?;
+        return probs.matmul(&v_chunks[0]);
+    }
+
+    // 1. Compute scores against all K chunks
+    let mut score_chunks = Vec::with_capacity(k_chunks.len());
+    let mut total_kv_len = 0;
+
+    for k_chunk in k_chunks {
+        total_kv_len += k_chunk.dims()[2];
+        let k_t = k_chunk.transpose(2, 3)?;
+        let score_chunk = (q.matmul(&k_t)? * scale)?;
+        score_chunks.push(score_chunk);
+    }
+
+    // 2. Concatenate scores to apply global Softmax
+    let all_scores = Tensor::cat(&score_chunks, 3)?;
+
+    // 3. Apply masking
+    let masked_scores = if is_causal || context_window.is_some() {
+        if q_len == 1 && context_window.is_none() {
+            all_scores
+        } else {
+            let mask = generate_mask_chunk(
+                0,
+                q_len,
+                total_kv_len,
+                q_len,
+                is_causal,
+                context_window,
+                device,
+            )?;
+            all_scores.broadcast_add(&mask)?
+        }
+    } else {
+        all_scores
+    };
+
+    // 4. Softmax
+    let probs = candle_nn::ops::softmax(&masked_scores, D::Minus1)?;
+
+    // 5. Compute Weighted Sum: Probs @ V
+    let mut output = Tensor::zeros((b, h, q_len, d), dtype, device)?;
+
+    let mut offset = 0;
+    for v_chunk in v_chunks {
+        let chunk_len = v_chunk.dims()[2];
+        let probs_chunk = probs.narrow(3, offset, chunk_len)?;
+        let out_chunk = probs_chunk.matmul(v_chunk)?;
+        output = (output + out_chunk)?;
+        offset += chunk_len;
+    }
+
+    Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use candle_core::Device;
+
+    #[test]
+    fn test_generate_mask_chunk_causal() -> Result<()> {
+        let device = Device::Cpu;
+        // q_len = 1, k_len = 5, total_q = 1
+        // shift = 4. pos_q = 4. pos_k = 0..5.
+        // is_future = j > 4. No futures.
+        let mask = generate_mask_chunk(0, 1, 5, 1, true, None, &device)?;
+        let mask_data = mask.flatten_all()?.to_vec1::<f32>()?;
+        assert_eq!(mask_data, vec![0.0, 0.0, 0.0, 0.0, 0.0]);
+
+        // q_len = 3, k_len = 3, total_q = 3 (prefill)
+        // shift = 0. pos_q = 0..3. pos_k = 0..3.
+        let mask = generate_mask_chunk(0, 3, 3, 3, true, None, &device)?;
+        let mask_data = mask.reshape((3, 3))?.to_vec2::<f32>()?;
+        // Row 0: pos_q=0. k=0 ok, k=1 future, k=2 future
+        assert_eq!(
+            mask_data[0],
+            vec![0.0, f32::NEG_INFINITY, f32::NEG_INFINITY]
+        );
+        // Row 1: pos_q=1. k=0,1 ok, k=2 future
+        assert_eq!(mask_data[1], vec![0.0, 0.0, f32::NEG_INFINITY]);
+        // Row 2: pos_q=2. k=0,1,2 ok
+        assert_eq!(mask_data[2], vec![0.0, 0.0, 0.0]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_generate_mask_chunk_window() -> Result<()> {
+        let device = Device::Cpu;
+        // ctx = 2. pos_q = 5. k_len = 6. total_q = 1.
+        // shift = 5. pos_q = 5. pos_k = 0..6.
+        // limit = 5 - 2 = 3.
+        // is_out = j <= 3 -> 0,1,2,3 masked. 4,5 ok.
+        let mask = generate_mask_chunk(0, 1, 6, 1, false, Some(2), &device)?;
+        let mask_data = mask.flatten_all()?.to_vec1::<f32>()?;
+        assert_eq!(
+            mask_data,
+            vec![
+                f32::NEG_INFINITY,
+                f32::NEG_INFINITY,
+                f32::NEG_INFINITY,
+                f32::NEG_INFINITY,
+                0.0,
+                0.0
+            ]
+        );
+
+        Ok(())
+    }
 }

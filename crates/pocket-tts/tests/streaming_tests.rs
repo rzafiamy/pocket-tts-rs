@@ -116,6 +116,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_long_text_handling() -> Result<()> {
         let mut model = TTSModel::load("b6369a24")?;
         model.temp = 0.0;

@@ -65,6 +65,10 @@ pub struct GenerateArgs {
     #[arg(long)]
     pub quantized: bool,
 
+    /// Use Metal acceleration (macOS only)
+    #[arg(long)]
+    pub use_metal: bool,
+
     /// Suppress all output except errors
     #[arg(short, long)]
     pub quiet: bool,
@@ -87,17 +91,45 @@ pub fn run(args: GenerateArgs) -> Result<()> {
         print_banner();
     }
 
+    // Set up device
+    let device = if args.use_metal {
+        #[cfg(feature = "metal")]
+        {
+            candle_core::Device::new_metal(0)?
+        }
+        #[cfg(not(feature = "metal"))]
+        {
+            anyhow::bail!("Metal feature not enabled. Rebuild with --features metal");
+        }
+    } else {
+        candle_core::Device::Cpu
+    };
+
+    if !quiet {
+        println!("  {} Using device: {:?}", "▶".cyan(), device);
+    }
+
     // Load model
     info!(quiet, "{} Loading model...", "▶".cyan());
 
-    let model = if args.quantized {
+    let is_voice_cloning = args
+        .voice
+        .as_ref()
+        .is_some_and(|v| v.ends_with(".wav") || v.starts_with("data:audio/wav"));
+
+    // If voice cloning, we default to quantized=true if not explicitly set
+    let quantized = args.quantized || is_voice_cloning;
+
+    let model = if quantized {
         #[cfg(feature = "quantized")]
         {
-            TTSModel::load_quantized_with_params(
+            TTSModel::load_quantized_with_params_device(
                 &args.variant,
                 args.temperature,
                 args.lsd_decode_steps,
                 args.eos_threshold,
+                args.noise_clamp,
+                &device,
             )?
         }
         #[cfg(not(feature = "quantized"))]
@@ -105,11 +137,13 @@ pub fn run(args: GenerateArgs) -> Result<()> {
             anyhow::bail!("Quantization feature not enabled. Rebuild with --features quantized");
         }
     } else {
-        TTSModel::load_with_params(
+        TTSModel::load_with_params_device(
             &args.variant,
             args.temperature,
             args.lsd_decode_steps,
             args.eos_threshold,
+            args.noise_clamp,
+            &device,
         )?
     };
 

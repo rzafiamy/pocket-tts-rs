@@ -4,6 +4,7 @@ use candle_core::{DType, Result, Tensor};
 use candle_nn::{Linear, Module, VarBuilder};
 use std::collections::HashMap;
 
+#[derive(Clone)]
 pub struct StreamingMultiheadAttention {
     embed_dim: usize,
     num_heads: usize,
@@ -46,138 +47,152 @@ impl StreamingMultiheadAttention {
     pub fn init_state(
         &self,
         batch_size: usize,
-        sequence_length: usize,
+        _sequence_length: usize,
         device: &candle_core::Device,
     ) -> Result<HashMap<String, Tensor>> {
         let dim_per_head = self.embed_dim / self.num_heads;
         let mut state = HashMap::new();
+        state.insert("pos".to_string(), Tensor::zeros((), DType::U32, device)?);
+
+        // Initial capacity: match context if windowed, otherwise reasonable default
+        let cap = self.context.unwrap_or(64);
         state.insert(
-            "current_end_len".to_string(),
-            Tensor::zeros((1,), DType::U32, device)?,
-        );
-        state.insert(
-            "cache".to_string(),
-            Tensor::full(
-                f32::NAN,
-                (2, batch_size, sequence_length, self.num_heads, dim_per_head),
+            "k_buf".to_string(),
+            Tensor::zeros(
+                (batch_size, self.num_heads, cap, dim_per_head),
+                DType::F32,
                 device,
             )?,
         );
+        state.insert(
+            "v_buf".to_string(),
+            Tensor::zeros(
+                (batch_size, self.num_heads, cap, dim_per_head),
+                DType::F32,
+                device,
+            )?,
+        );
+        state.insert("l".to_string(), Tensor::zeros((), DType::I64, device)?);
         Ok(state)
     }
 
-    pub fn forward(&self, query: &Tensor, model_state: &mut ModelState) -> Result<Tensor> {
-        let projected = self.in_proj.forward(query)?;
-        let (b, t, _) = projected.dims3()?;
+    pub fn forward(
+        &self,
+        query: &Tensor,
+        model_state: &mut ModelState,
+        current_pos: usize,
+        current_len: usize,
+    ) -> Result<Tensor> {
+        let (b, t, _) = query.dims3()?;
         let d = self.embed_dim / self.num_heads;
+        let window_size = self.context;
 
         // Auto-initialize state if missing
         if !model_state.contains_key(&self.name) {
-            // Heuristic for KV cache size:
-            // If t is small (generation/streaming), reserve space for future tokens (e.g. 100x).
-            // If t is large (prompt processing), reserve just enough plus a small buffer.
-            // This prevents allocating 100x memory for long audio prompts (e.g., 100 * 10MB = 1GB).
-            let capacity = if t > 100 {
-                t + 2048 // Prompt + reasonable generation buffer
-            } else {
-                t * 100 // Short start, expect generation
-            };
-
-            let init = self.init_state(b, capacity, query.device())?;
-            model_state.insert(self.name.clone(), init);
+            model_state.insert(self.name.clone(), self.init_state(b, 0, query.device())?);
         }
 
         let module_state = model_state.get_mut(&self.name).unwrap();
 
+        let projected = self.in_proj.forward(query)?;
+
         // Reshape to (b, t, 3, h, d)
         let packed = projected.reshape((b, t, 3, self.num_heads, d))?;
-        let q = packed.narrow(2, 0, 1)?.squeeze(2)?;
-        let k = packed.narrow(2, 1, 1)?.squeeze(2)?;
-        let v = packed.narrow(2, 2, 1)?.squeeze(2)?;
+        let mut q = packed.narrow(2, 0, 1)?.squeeze(2)?; // (b, t, h, d)
+        let mut k = packed.narrow(2, 1, 1)?.squeeze(2)?; // (b, t, h, d)
+        let mut v = packed.narrow(2, 2, 1)?.squeeze(2)?; // (b, t, h, d)
 
-        let current_end = module_state
-            .get("current_end_len")
-            .ok_or_else(|| candle_core::Error::Msg("current_end_len not found".to_string()))?
-            .to_vec1::<u32>()?[0] as usize;
+        // current_pos passed as argument
 
-        let (q, k) = self.rope.forward(&q, &k, current_end)?;
+        // Apply RoPE
+        // RoPE expects (B, T, H, D)
+        (q, k) = self.rope.forward(&q, &k, current_pos)?;
 
-        // Update KV cache
-        let _cache = module_state.get_mut("cache").unwrap();
-        // cache is (2, B, S, H, D)
-        // k, v are (B, T, H, D)
-        // We need to copy k to cache[0, :, current_end:current_end+T, :, :]
-        // and v to cache[1, :, current_end:current_end+T, :, :]
+        // Transpose q, k, v to (B, H, T, D) for SDPA and KV cache
+        q = q.transpose(1, 2)?;
+        k = k.transpose(1, 2)?;
+        v = v.transpose(1, 2)?;
 
-        // This is tricky in Candle without in-place mutation of a tensor that is shared.
-        // For now, we'll use a simplified implementation where we slice and concat or narrow.
-        // However, if we want actual performance and correctness, we need to manage this cache.
+        // KV Cache Management with Doubling Buffer
+        // We take ownership from the state to avoid clones and ensure uniqueness for slice_set
+        let (mut k_buf, mut v_buf, mut current_len) =
+            match (module_state.remove("k_buf"), module_state.remove("v_buf")) {
+                (Some(kb), Some(vb)) => (kb, vb, current_len),
+                _ => {
+                    let initial_cap = window_size.unwrap_or(64);
+                    let kb =
+                        Tensor::zeros((b, self.num_heads, initial_cap, d), q.dtype(), q.device())?;
+                    let vb =
+                        Tensor::zeros((b, self.num_heads, initial_cap, d), q.dtype(), q.device())?;
+                    (kb, vb, 0)
+                }
+            };
 
-        // Let's implement a simplified KV update for now (concatenation) and optimize later.
-        // But wait, the original code uses a pre-allocated cache.
+        let cap = k_buf.dim(2)?; // Current capacity of the buffer
+        let q_len = q.dim(2)?; // Length of the current query/key/value batch
 
-        // To update a slice in Candle:
-        // We can't do it easily on a Tensor. We should probably store the cache as a list of chunks or
-        // use a single tensor and `index_copy` if available, or recreate it.
-
-        // Let's use `slice_assign` logic if it exists, or just concat for the prototype.
-        // Actually, Candle doesn't have slice_assign.
-
-        // Let's use the `current_end` to narrow the cache and then update it.
-        // But we want to avoid re-allocating the whole cache every step.
-
-        // For Phase 2, I'll use a growing KV cache (simple concat) to get the logic right.
-        let k_state = if current_end == 0 {
-            k.clone()
+        if let Some(window_size) = self.context {
+            // Windowed Attention (Mimi)
+            // If we exceed window_size, we shift the buffer left.
+            // This is slightly less efficient than a ring buffer but keeps the sequence linear for RoPE.
+            // Since window_size is small (e.g. 1024), the copy is negligible compared to masking overhead.
+            if current_len + q_len > window_size {
+                let shift = (current_len + q_len).saturating_sub(window_size);
+                let to_move = current_len.saturating_sub(shift);
+                if to_move > 0 {
+                    let k_to_move = k_buf.narrow(2, shift, to_move)?;
+                    let v_to_move = v_buf.narrow(2, shift, to_move)?;
+                    k_buf.slice_set(&k_to_move.contiguous()?, 2, 0)?;
+                    v_buf.slice_set(&v_to_move.contiguous()?, 2, 0)?;
+                    current_len = to_move;
+                } else {
+                    current_len = 0;
+                }
+            }
+            k_buf.slice_set(&k.contiguous()?, 2, current_len)?;
+            v_buf.slice_set(&v.contiguous()?, 2, current_len)?;
+            current_len += q_len;
         } else {
-            let k_prev = module_state
-                .get("k_cache")
-                .ok_or_else(|| candle_core::Error::Msg("k_cache not found".to_string()))?
-                .clone();
-            Tensor::cat(&[k_prev, k.clone()], 1)?
-        };
-        let v_state = if current_end == 0 {
-            v.clone()
-        } else {
-            let v_prev = module_state
-                .get("v_cache")
-                .ok_or_else(|| candle_core::Error::Msg("v_cache not found".to_string()))?
-                .clone();
-            Tensor::cat(&[v_prev, v.clone()], 1)?
-        };
+            // Linear Attention (FlowLM) with Doubling Buffer
+            if current_len + q_len > cap {
+                let new_cap = (current_len + q_len).next_power_of_two();
+                let zeros_shape = (b, self.num_heads, new_cap - cap, d);
+                let k_zeros = Tensor::zeros(zeros_shape, q.dtype(), q.device())?;
+                let v_zeros = Tensor::zeros(zeros_shape, q.dtype(), q.device())?;
+                k_buf = Tensor::cat(&[k_buf, k_zeros], 2)?;
+                v_buf = Tensor::cat(&[v_buf, v_zeros], 2)?;
+            }
+            k_buf.slice_set(&k.contiguous()?, 2, current_len)?;
+            v_buf.slice_set(&v.contiguous()?, 2, current_len)?;
+            current_len += q_len;
+        }
 
-        // Compute attention using memory-efficient tiled implementation
-        let q_t = q.transpose(1, 2)?;
-        let k_t = k_state.transpose(1, 2)?;
-        let v_t = v_state.transpose(1, 2)?;
-
-        let scale = 1.0 / (d as f64).sqrt();
-
-        // Output: [B, H, T, D]
-        // We pass is_causal=true (since it's a streaming/causal model) and the context window.
-        // The sdpa function handles on-the-fly mask generation per tile.
-        let x = crate::modules::sdpa::sdpa(
-            &q_t,
-            &k_t,
-            &v_t,
-            scale,
-            true,         // is_causal
-            self.context, // context_window
-        )?;
-
-        // Transpose back to [B, T, H, D] for output projection
-        // let x = x.transpose(1, 2)?.reshape((b, t, self.embed_dim))?; -- this is done in next lines usually
-
-        let x = x.transpose(1, 2)?.reshape((b, t, self.embed_dim))?;
-        let x = self.out_proj.forward(&x)?;
+        // Prepare current KV for attention
+        let kc = k_buf.narrow(2, 0, current_len)?;
+        let vc = v_buf.narrow(2, 0, current_len)?;
 
         // Update state
-        module_state.insert("k_cache".to_string(), k_state);
-        module_state.insert("v_cache".to_string(), v_state);
+        module_state.insert("k_buf".to_string(), k_buf);
+        module_state.insert("v_buf".to_string(), v_buf);
         module_state.insert(
-            "current_end_len".to_string(),
-            Tensor::from_vec(vec![(current_end + t) as u32], (1,), q.device())?,
+            "l".to_string(),
+            Tensor::new(current_len as i64, q.device())?,
         );
+        module_state.insert(
+            "pos".to_string(),
+            Tensor::new((current_pos + t) as u32, q.device())?,
+        );
+
+        // Scaled dot-product attention
+        let scale = 1.0 / (d as f64).sqrt();
+        let x = crate::modules::sdpa::sdpa(
+            &q, &kc, &vc, scale, true, // is_causal
+            None, // context_window (already handled by pruning KV cache)
+        )?;
+
+        // Transpose back to [B, T, H, D] and project out
+        let x = x.transpose(1, 2)?.reshape((b, t, self.embed_dim))?;
+        let x = self.out_proj.forward(&x)?;
 
         Ok(x)
     }

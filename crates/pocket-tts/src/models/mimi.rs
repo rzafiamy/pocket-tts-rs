@@ -5,6 +5,7 @@ use crate::modules::conv::{ConvDownsample1d, ConvTrUpsample1d};
 use candle_core::{Result, Tensor};
 use candle_nn::{Conv1d, Conv1dConfig, Module, VarBuilder};
 
+#[derive(Clone)]
 pub struct Quantizer {
     output_proj: Conv1d,
 }
@@ -35,6 +36,7 @@ impl Quantizer {
     }
 }
 
+#[derive(Clone)]
 pub struct MimiModel {
     pub encoder: SEANetEncoder,
     pub decoder: SEANetDecoder,
@@ -108,7 +110,12 @@ impl MimiModel {
         (self.sample_rate as f64 / self.frame_rate) as usize
     }
 
-    pub fn encode_to_latent(&self, x: &Tensor, model_state: &mut ModelState) -> Result<Tensor> {
+    pub fn encode_to_latent(
+        &self,
+        x: &Tensor,
+        model_state: &mut ModelState,
+        step: usize,
+    ) -> Result<Tensor> {
         // x shape [B, C, T]
         let _frame_size = self.frame_size();
         let (b, c, _t_orig) = x.dims3()?;
@@ -123,12 +130,12 @@ impl MimiModel {
             x.clone()
         };
 
-        let mut emb = self.encoder.forward(&x, model_state)?;
-        let mut embs = self.encoder_transformer.forward(&emb, model_state)?;
+        let mut emb = self.encoder.forward(&x, model_state, step)?;
+        let mut embs = self.encoder_transformer.forward(&emb, model_state, step)?;
         emb = embs.remove(0);
 
         if let Some(down) = &self.downsample {
-            emb = down.forward(&emb, model_state)?;
+            emb = down.forward(&emb, model_state, step)?;
         }
         Ok(emb)
     }
@@ -137,14 +144,15 @@ impl MimiModel {
         &self,
         latent: &Tensor,
         model_state: &mut ModelState,
+        step: usize,
     ) -> Result<Tensor> {
         let mut emb = latent.clone();
         if let Some(up) = &self.upsample {
-            emb = up.forward(&emb, model_state)?;
+            emb = up.forward(&emb, model_state, step)?;
         }
-        let mut embs = self.decoder_transformer.forward(&emb, model_state)?;
+        let mut embs = self.decoder_transformer.forward(&emb, model_state, step)?;
         emb = embs.remove(0);
-        let out = self.decoder.forward(&emb, model_state)?;
+        let out = self.decoder.forward(&emb, model_state, step)?;
         Ok(out)
     }
     pub fn quantize(&self, x: &Tensor) -> Result<Tensor> {

@@ -10,11 +10,14 @@ use tokenizers::Tokenizer;
 use anyhow::Result;
 use std::path::Path;
 
+use std::sync::Arc;
+
+#[derive(Clone)]
 pub struct LUTConditioner {
     #[cfg(not(target_arch = "wasm32"))]
-    sp: SentencePieceProcessor,
+    sp: Arc<SentencePieceProcessor>,
     #[cfg(target_arch = "wasm32")]
-    tokenizer: Tokenizer,
+    tokenizer: Arc<Tokenizer>,
     embed: Embedding,
 }
 
@@ -44,7 +47,10 @@ impl LUTConditioner {
             // n_bins + 1 for padding
             let embed = candle_nn::embedding(n_bins + 1, dim, vb.pp("embed"))?;
 
-            Ok(Self { sp, embed })
+            Ok(Self {
+                sp: Arc::new(sp),
+                embed,
+            })
         }
 
         #[cfg(target_arch = "wasm32")]
@@ -113,5 +119,27 @@ impl LUTConditioner {
 
     pub fn forward(&self, tokens: &Tensor) -> Result<Tensor> {
         Ok(self.embed.forward(tokens)?)
+    }
+
+    /// Count tokens in a text string without creating tensors.
+    /// Used for accurate text splitting to avoid oversized chunks.
+    pub fn count_tokens(&self, text: &str) -> Result<usize> {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let pieces = self
+                .sp
+                .encode(text)
+                .map_err(|e| anyhow::anyhow!("Failed to encode text: {:?}", e))?;
+            Ok(pieces.len())
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            let encoding = self
+                .tokenizer
+                .encode(text, true)
+                .map_err(|e| anyhow::anyhow!("Failed to encode text: {:?}", e))?;
+            Ok(encoding.get_ids().len())
+        }
     }
 }

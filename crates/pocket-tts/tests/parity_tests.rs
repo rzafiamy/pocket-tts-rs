@@ -105,7 +105,7 @@ fn test_voice_conditioning_parity() {
     let mut state = init_states(1, 1000);
     let latents = model
         .mimi
-        .encode_to_latent(&audio, &mut state)
+        .encode_to_latent(&audio, &mut state, 0)
         .expect("encode failed");
 
     // Calculate conditioning: latents * speaker_proj.t()
@@ -251,7 +251,7 @@ fn test_mimi_latents_parity() {
     let mut state = init_states(1, 1000);
     let latents = model
         .mimi
-        .encode_to_latent(&audio, &mut state)
+        .encode_to_latent(&audio, &mut state, 0)
         .expect("encode failed");
 
     // Load ref
@@ -265,7 +265,7 @@ fn test_mimi_latents_parity() {
     // Layer 0: Conv
     let layer0_out = if let Some(layer0_ref) = tensors.get("layer0_out") {
         let out = model.mimi.encoder.layers[0]
-            .forward(&audio, &mut state)
+            .forward(&audio, &mut state, 0)
             .expect("layer0 failed");
         println!(
             "Layer0 Parity check... Rust: {:?}, Ref: {:?}",
@@ -276,14 +276,14 @@ fn test_mimi_latents_parity() {
         out
     } else {
         model.mimi.encoder.layers[0]
-            .forward(&audio, &mut state)
+            .forward(&audio, &mut state, 0)
             .expect("layer0 failed")
     };
 
     // Layer 1: Resnet
     let layer1_out = if let Some(layer1_ref) = tensors.get("layer1_out") {
         let out = model.mimi.encoder.layers[1]
-            .forward(&layer0_out, &mut state)
+            .forward(&layer0_out, &mut state, 0)
             .expect("layer1 failed");
         println!(
             "Layer1 (Resnet) Parity check... Rust: {:?}, Ref: {:?}",
@@ -294,14 +294,14 @@ fn test_mimi_latents_parity() {
         out
     } else {
         model.mimi.encoder.layers[1]
-            .forward(&layer0_out, &mut state)
+            .forward(&layer0_out, &mut state, 0)
             .expect("layer1 failed")
     };
 
     // Layer 2: ELU
     let layer2_out = if let Some(layer2_ref) = tensors.get("layer2_out") {
         let out = model.mimi.encoder.layers[2]
-            .forward(&layer1_out, &mut state)
+            .forward(&layer1_out, &mut state, 0)
             .expect("layer2 failed");
         println!(
             "Layer2 (ELU) Parity check... Rust: {:?}, Ref: {:?}",
@@ -312,14 +312,14 @@ fn test_mimi_latents_parity() {
         out
     } else {
         model.mimi.encoder.layers[2]
-            .forward(&layer1_out, &mut state)
+            .forward(&layer1_out, &mut state, 0)
             .expect("layer2 failed")
     };
 
     // Layer 3: Downsample (ratio 4)
     let _layer3_out = if let Some(layer3_ref) = tensors.get("layer3_out") {
         let out = model.mimi.encoder.layers[3]
-            .forward(&layer2_out, &mut state)
+            .forward(&layer2_out, &mut state, 0)
             .expect("layer3 failed");
         println!(
             "Layer3 (Downsample) Parity check... Rust: {:?}, Ref: {:?}",
@@ -330,7 +330,7 @@ fn test_mimi_latents_parity() {
         out
     } else {
         model.mimi.encoder.layers[3]
-            .forward(&layer2_out, &mut state)
+            .forward(&layer2_out, &mut state, 0)
             .expect("layer3 failed")
     };
 
@@ -340,7 +340,7 @@ fn test_mimi_latents_parity() {
         let seanet_out = model
             .mimi
             .encoder
-            .forward(&audio, &mut state)
+            .forward(&audio, &mut state, 0)
             .expect("seanet failed");
         println!(
             "SEANet Parity check... Rust: {:?}, Ref: {:?}",
@@ -355,13 +355,13 @@ fn test_mimi_latents_parity() {
         let seanet_out = model
             .mimi
             .encoder
-            .forward(&audio, &mut state)
+            .forward(&audio, &mut state, 0)
             .expect("seanet failed");
         let mut tr_state = init_states(1, 1000);
         let mut embs = model
             .mimi
             .encoder_transformer
-            .forward(&seanet_out, &mut tr_state)
+            .forward(&seanet_out, &mut tr_state, 0)
             .expect("tr failed");
         let tr_out = embs.remove(0);
         println!(
@@ -563,7 +563,7 @@ fn test_decoder_parity() {
     // Test upsample
     let after_upsample = if let Some(ref up) = model.mimi.upsample {
         let out = up
-            .forward(ref_quantized, &mut mimi_state)
+            .forward(ref_quantized, &mut mimi_state, 0)
             .expect("upsample failed");
         println!(
             "\nUpsample Rust: {:?}, Ref: {:?}",
@@ -581,7 +581,7 @@ fn test_decoder_parity() {
     let mut after_decoder_tr_vec = model
         .mimi
         .decoder_transformer
-        .forward(&after_upsample, &mut mimi_state)
+        .forward(&after_upsample, &mut mimi_state, 0)
         .expect("decoder_transformer failed");
     let after_decoder_tr = after_decoder_tr_vec.remove(0);
 
@@ -597,7 +597,7 @@ fn test_decoder_parity() {
     let final_audio = model
         .mimi
         .decoder
-        .forward(&after_decoder_tr, &mut mimi_state)
+        .forward(&after_decoder_tr, &mut mimi_state, 0)
         .expect("decoder failed");
 
     println!(

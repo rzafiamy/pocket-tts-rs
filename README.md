@@ -8,39 +8,47 @@ Text-to-speech that runs entirely on CPU—no Python, no GPU required.
 
 - **Pure Rust** - No Python runtime, just a single binary
 - **CPU-only** - Runs on CPU, no GPU required
-- **Streaming** - Generate audio progressively as it's synthesized
-- **Voice cloning** - Clone any voice from a few seconds of audio
-- **Infinite text** - Handle arbitrarily long text inputs via automatic segmentation
+- **Metal Acceleration** - Build with `--features metal` for hardware acceleration on macOS
 - **int8 Quantization** - Significant speedup and smaller memory footprint
+- **Streaming** - Full-pipeline stateful streaming (FlowLM + Mimi) for zero-latency audio
+- **Project Structure** - Clean, modular workspace design
 - **WebAssembly** - Run the full model in any modern web browser
 - **Pause Handling** - Support for natural pauses and explicit `[pause:Xms]` syntax
 - **HTTP API** - REST API server with OpenAI-compatible endpoint
-- **Web UI** - Built-in web interface for interactive use
+- **Web UI** - Built-in web interface (React/Vite) for interactive use
+- **Flexible Builds** - Use `--no-default-features` for a "lite" build without web UI assets
 - **Python Bindings** - Use the Rust implementation from Python for improved performance
 
 ## Quick Start
 
-### Build from source
-
 ```bash
-cd candle
+# Build with default features (includes Web UI assets)
 cargo build --release
+
+# Build "lite" version (no Web UI assets, API only)
+cargo build --release --no-default-features
+
+# Build with Metal support (macOS only)
+cargo build --release --features metal
 ```
 
 ### Generate audio
 
 ```bash
 # Using default voice
-cargo run --release -p pocket-tts-cli -- generate --text "Hello, world!"
+cargo run --release --package pocket-tts-cli -- generate --text "Hello, world!"
+
+# Using Metal acceleration (if enabled)
+cargo run --release --features metal --package pocket-tts-cli -- generate --text "Hello, world!" --use-metal
 
 # Using a custom voice (WAV file)
-cargo run --release -p pocket-tts-cli -- generate \
+cargo run --release --package pocket-tts-cli -- generate \
     --text "Hello, world!" \
     --voice ./my_voice.wav \
     --output output.wav
 
 # Using a predefined voice
-cargo run --release -p pocket-tts-cli -- generate --voice alba
+cargo run --release --package pocket-tts-cli -- generate --voice alba
 ```
 
 ### Start the HTTP server
@@ -72,7 +80,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-pocket-tts = { path = "candle/crates/pocket-tts" }
+pocket-tts = { path = "crates/pocket-tts" }
 ```
 
 ## Library Usage
@@ -143,6 +151,7 @@ Options:
       --eos-threshold <FLOAT>    EOS threshold [default: -4.0]
       --stream                   Stream raw PCM to stdout
   -q, --quiet                    Suppress output
+      --use-metal                Use Metal acceleration (macOS)
 ```
 
 **Predefined voices:** `alba`, `marius`, `javert`, `jean`, `fantine`, `cosette`, `eponine`, `azelma`
@@ -161,7 +170,6 @@ Options:
       --variant <VARIANT>        Model variant [default: b6369a24]
       --temperature <FLOAT>      Temperature [default: 0.7]
       --lsd-decode-steps <INT>   LSD steps [default: 1]
-      --lsd-decode-steps <INT>   LSD steps [default: 1]
       --eos-threshold <FLOAT>    EOS threshold [default: -4.0]
 
 ## Python Bindings
@@ -173,7 +181,7 @@ The Rust implementation can be used as a Python module for improved performance 
 Requires [maturin](https://github.com/PyO3/maturin).
 
 ```bash
-cd candle/crates/pocket-tts-bindings
+cd crates/pocket-tts-bindings
 uvx maturin develop --release
 ```
 
@@ -257,7 +265,7 @@ candle/
 │       │   ├── commands/       # generate, serve
 │       │   ├── server/         # Axum HTTP server
 │       │   └── voice.rs        # Voice resolution
-│       └── static/             # Web UI assets
+│       └── web/                # React/Vite Web UI source
 └── docs/                   # Documentation
 ```
 
@@ -272,7 +280,7 @@ The Rust port mirrors the Python implementation:
 ### Key differences from Python
 
 - Uses [Candle](https://github.com/huggingface/candle) instead of PyTorch
-- Stateless streaming (no internal module state)
+- **Full-pipeline stateful streaming** (KV-caching for Transformer, overlap-add for Mimi)
 - Polyphase resampling via [rubato](https://crates.io/crates/rubato) (matches scipy)
 - Compiled to native code—no JIT, no Python overhead
 
@@ -290,12 +298,12 @@ cargo bench -p pocket-tts
 
 Benchmarks run on User Hardware (vs Python baseline):
 
-- **Short Text**: ~3.57x speedup
-- **Medium Text**: ~2.40x speedup
-- **Long Text**: ~2.44x speedup
-- **Latency**: ~128ms to first audio chunk
+- **Short Text**: ~6.20x speedup
+- **Medium Text**: ~3.47x speedup
+- **Long Text**: ~3.33x speedup
+- **Latency**: ~80ms to first audio chunk (optimized)
 
-Rust is consistently **>2.4x faster** than the optimized Python implementation.
+Rust is consistently **>3.1x faster** than the optimized Python implementation.
 
 ## Numerical Parity
 

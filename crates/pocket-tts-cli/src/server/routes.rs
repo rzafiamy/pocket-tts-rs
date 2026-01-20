@@ -16,13 +16,7 @@ pub fn create_router(state: AppState) -> Router {
         .allow_methods(Any)
         .allow_headers(Any);
 
-    // Static files router
-    let static_router = Router::new().fallback(handlers::serve_static);
-
-    Router::new()
-        // Web interface
-        .route("/", get(handlers::serve_index))
-        .nest("/static", static_router)
+    let router = Router::new()
         // Health check
         .route("/health", get(handlers::health_check))
         // Generation endpoints
@@ -31,8 +25,14 @@ pub fn create_router(state: AppState) -> Router {
         // Python API compatibility (multipart form)
         .route("/tts", post(handlers::tts_form))
         // OpenAI compatibility
-        .route("/v1/audio/speech", post(handlers::openai_speech))
-        // Middleware
+        .route("/v1/audio/speech", post(handlers::openai_speech));
+
+    // Static files and SPA fallback (conditionally included)
+    #[cfg(feature = "web-ui")]
+    let router = router.fallback(handlers::serve_static);
+
+    // Middleware
+    router
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state)

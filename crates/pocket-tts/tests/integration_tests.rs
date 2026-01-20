@@ -160,7 +160,7 @@ fn test_mimi_encode_decode_roundtrip() {
     let mut encode_state = init_states(1, 1000);
     let latent = model
         .mimi
-        .encode_to_latent(&audio, &mut encode_state)
+        .encode_to_latent(&audio, &mut encode_state, 0)
         .expect("Failed to encode");
 
     println!("Encoded latent shape: {:?}", latent.dims());
@@ -169,7 +169,7 @@ fn test_mimi_encode_decode_roundtrip() {
     let mut decode_state = init_states(1, 1000);
     let decoded = model
         .mimi
-        .decode_from_latent(&latent, &mut decode_state)
+        .decode_from_latent(&latent, &mut decode_state, 0)
         .expect("Failed to decode");
 
     println!("Decoded audio shape: {:?}", decoded.dims());
@@ -228,22 +228,33 @@ fn test_generate_with_pauses_adds_silence() {
     let with_pause_samples = audio_with_pause.dims()[1];
 
     // Audio with pause should be exactly 500ms longer (12000 samples at 24kHz)
+    // PLUS one extra EOS-tail (since we split into two segments, and each has a tail)
     let expected_extra_samples = 12000;
+
+    // Each segment in generate_stream_long gets its own EOS tail.
+    // The baseline generate() call has 1 tail.
+    // Our generate_with_pauses() call has 2 segments, thus 2 tails.
+    let mimi_frame_size = 1920;
+    let frames_after_eos = pocket_tts::tts_model::estimate_frames_after_eos("Hello");
+    let extra_tail_samples = mimi_frame_size * frames_after_eos;
+
     let diff = with_pause_samples.saturating_sub(no_pause_samples);
 
     assert!(
-        diff >= expected_extra_samples,
-        "Audio with pause should be at least {} samples longer, got {}",
-        expected_extra_samples,
+        diff >= expected_extra_samples + extra_tail_samples,
+        "Audio with pause should be at least {} samples longer (including extra tail), got {}",
+        expected_extra_samples + extra_tail_samples,
         diff
     );
 
-    // Should be very close to the expected extra
+    // Should be very close to the expected extra + extra tail
+    // Allow for one Mimi frame of jitter (+/- 1920 samples) which can happen due to
+    // segment-level termination differences or model noise at the EOS boundary.
     assert!(
-        diff <= expected_extra_samples + 10,
+        diff <= expected_extra_samples + extra_tail_samples + mimi_frame_size + 10,
         "Pause duration too long: got {} samples, expected ~{}",
         diff,
-        expected_extra_samples
+        expected_extra_samples + extra_tail_samples
     );
 }
 

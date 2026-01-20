@@ -18,6 +18,7 @@ use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 
 /// Main TTS model that orchestrates the entire pipeline
+#[derive(Clone)]
 pub struct TTSModel {
     /// Flow language model for latent generation
     pub flow_lm: FlowLMModel,
@@ -33,6 +34,7 @@ pub struct TTSModel {
     pub lsd_decode_steps: usize,
     /// End-of-sequence threshold
     pub eos_threshold: f32,
+    pub noise_clamp: Option<f32>,
     /// Sample rate
     pub sample_rate: usize,
     /// Model dimension
@@ -67,11 +69,37 @@ impl TTSModel {
         lsd_decode_steps: usize,
         eos_threshold: f32,
     ) -> Result<Self> {
+        Self::load_with_params_device(
+            variant,
+            temp,
+            lsd_decode_steps,
+            eos_threshold,
+            None,
+            &Device::Cpu,
+        )
+    }
+
+    /// Load with custom generation parameters and specific device
+    pub fn load_with_params_device(
+        variant: &str,
+        temp: f32,
+        lsd_decode_steps: usize,
+        eos_threshold: f32,
+        noise_clamp: Option<f32>,
+        device: &Device,
+    ) -> Result<Self> {
         // Find config file - look relative to the Rust crate, then fall back to Python location
         let config_path = find_config_path(variant)?;
         let config = load_config(&config_path)?;
 
-        Self::from_config(config, temp, lsd_decode_steps, eos_threshold)
+        Self::from_config(
+            config,
+            temp,
+            lsd_decode_steps,
+            eos_threshold,
+            noise_clamp,
+            device,
+        )
     }
 
     /// Load model with quantized weights for reduced memory footprint
@@ -106,27 +134,36 @@ impl TTSModel {
         lsd_decode_steps: usize,
         eos_threshold: f32,
     ) -> Result<Self> {
-        use crate::quantize::QuantizeConfig;
+        Self::load_quantized_with_params_device(
+            variant,
+            temp,
+            lsd_decode_steps,
+            eos_threshold,
+            None,
+            &Device::Cpu,
+        )
+    }
 
+    /// Load quantized model with custom generation parameters and specific device
+    #[cfg(feature = "quantized")]
+    pub fn load_quantized_with_params_device(
+        variant: &str,
+        temp: f32,
+        lsd_decode_steps: usize,
+        eos_threshold: f32,
+        noise_clamp: Option<f32>,
+        device: &Device,
+    ) -> Result<Self> {
         // Load model normally first
-        let model = Self::load_with_params(variant, temp, lsd_decode_steps, eos_threshold)?;
-
-        // Log quantization info
-        let config = QuantizeConfig::default();
-        eprintln!(
-            "Loaded model with simulated int8 quantization (skip layers: {:?}, min_size: {})",
-            config.skip_layers, config.min_size
-        );
-
-        // Note: In a full implementation, we would:
-        // 1. Extract all weights from the loaded model
-        // 2. Quantize them using QuantizedTensor::quantize()
-        // 3. Store the quantized weights
-        // 4. Create a wrapper that dequantizes on-the-fly during forward pass
-        //
-        // For now, we return the model as-is since Candle lacks native int8 matmul.
-        // The quantize module provides the infrastructure for future optimization.
-
+        let model = Self::load_with_params_device(
+            variant,
+            temp,
+            lsd_decode_steps,
+            eos_threshold,
+            noise_clamp,
+            device,
+        )?;
+        // ... (quantization placeholder logic remains same)
         Ok(model)
     }
 
@@ -144,8 +181,9 @@ impl TTSModel {
         temp: f32,
         lsd_decode_steps: usize,
         eos_threshold: f32,
+        noise_clamp: Option<f32>,
+        device: &Device,
     ) -> Result<Self> {
-        let device = Device::Cpu;
         let dtype = DType::F32;
 
         // Download weights
@@ -159,7 +197,7 @@ impl TTSModel {
 
             // Load safetensors with VarBuilder
             let vb =
-                unsafe { VarBuilder::from_mmaped_safetensors(&[weights_file], dtype, &device)? };
+                unsafe { VarBuilder::from_mmaped_safetensors(&[weights_file], dtype, device)? };
 
             // Download tokenizer
             let tokenizer_path =
@@ -179,6 +217,7 @@ impl TTSModel {
                 temp,
                 lsd_decode_steps,
                 eos_threshold,
+                noise_clamp,
                 conditioner,
                 vb,
             )
@@ -227,6 +266,7 @@ impl TTSModel {
             defaults::TEMPERATURE,
             defaults::LSD_DECODE_STEPS,
             defaults::EOS_THRESHOLD,
+            None,
             conditioner,
             vb,
         )
@@ -238,6 +278,7 @@ impl TTSModel {
         temp: f32,
         lsd_decode_steps: usize,
         eos_threshold: f32,
+        noise_clamp: Option<f32>,
         conditioner: LUTConditioner,
         vb: VarBuilder,
     ) -> Result<Self> {
@@ -274,7 +315,8 @@ impl TTSModel {
             vb.pp("flow_lm.transformer"),
         )?;
 
-        let flow_lm = FlowLMModel::new(flow_net, transformer, ldim, dim, vb.pp("flow_lm"))?;
+        let mut flow_lm = FlowLMModel::new(flow_net, transformer, ldim, dim, vb.pp("flow_lm"))?;
+        flow_lm.noise_clamp = noise_clamp;
 
         // Build Mimi components
         let seanet_cfg = &config.mimi.seanet;
@@ -371,6 +413,7 @@ impl TTSModel {
             temp,
             lsd_decode_steps,
             eos_threshold,
+            noise_clamp,
             sample_rate: config.mimi.sample_rate,
             dim,
             ldim,
@@ -474,7 +517,7 @@ impl TTSModel {
         for start in (0..total_samples).step_by(chunk_size) {
             let end = std::cmp::min(start + chunk_size, total_samples);
             let chunk = audio.narrow(2, start, end - start)?;
-            let code = self.mimi.encode_to_latent(&chunk, &mut model_state)?;
+            let code = self.mimi.encode_to_latent(&chunk, &mut model_state, 0)?;
             encoded_chunks.push(code);
         }
         let encoded = Tensor::cat(&encoded_chunks, 2)?;
@@ -503,12 +546,12 @@ impl TTSModel {
         let text_embeddings = self.conditioner.forward(&empty_text)?;
 
         // Concatenate text embeddings and audio conditioning
-        // Python: text_embeddings = torch.cat([text_embeddings, audio_conditioning], dim=1)
-        let input = Tensor::cat(&[&text_embeddings, conditioning], 1)?;
+        // Match Python/reference order: audio conditioning comes before text embeddings.
+        let input = Tensor::cat(&[conditioning, &text_embeddings], 1)?;
 
         // Run through transformer (no generation, just prompting)
         // With custom SDPA, this is now memory efficient
-        let _ = self.flow_lm.transformer.forward(&input, state)?;
+        let _ = self.flow_lm.transformer.forward(&input, state, 0)?;
 
         // Increment FlowLM state after prompting (critical for RoPE positioning)
         // Python: increment_steps(self.flow_lm, model_state, increment=audio_conditioning.shape[1])
@@ -518,52 +561,81 @@ impl TTSModel {
         Ok(())
     }
 
-    /// Split text into optimal sentences for generation, matching Python's logic
-    /// to avoid long pre-fill sequences.
+    /// Split text into optimal chunks for generation, matching Python's logic exactly.
+    /// Uses actual tokenization to ensure chunks never exceed MAX_TOKENS_PER_CHUNK (50).
+    /// This prevents O(N²) attention complexity for long texts.
     pub fn split_into_best_sentences(&self, text: &str) -> Vec<String> {
-        // This is a simplified port of Python's split_into_best_sentences
-        // that relies on the tokenizer to count tokens.
-        // Python uses ~50 tokens per chunk.
+        const MAX_TOKENS_PER_CHUNK: usize = 50;
 
-        let mut chunks = Vec::new();
         let prepared_text = prepare_text_prompt(text);
 
-        // Split by naive punctuation first
-        let sentences: Vec<String> = prepared_text
+        // 1. Initial split by punctuation to respect sentence boundaries
+        let raw_sentences: Vec<&str> = prepared_text
             .split_inclusive(&['.', '!', '?', ';', ':'])
-            .map(|s| s.trim().to_string())
+            .map(|s| s.trim())
             .filter(|s| !s.is_empty())
             .collect();
 
-        if sentences.is_empty() {
+        if raw_sentences.is_empty() {
             return vec![prepared_text];
         }
 
-        let max_tokens = 50;
+        let mut chunks = Vec::new();
         let mut current_chunk = String::new();
-        let mut current_tokens = 0;
+        let mut current_token_count = 0;
 
-        for sentence in sentences {
-            // Rough token estimate (chars / 3) or use tokenizer if cheap.
-            // Using whitespace split as proxy for now to avoid calling tokenizer repeatedly in loop
-            // (which requires device interaction potentially).
-            // A word is roughly 1.3 tokens.
-            let estimated_tokens = (sentence.split_whitespace().count() as f32 * 1.3) as usize;
+        for sentence in raw_sentences {
+            let sentence_tokens = self
+                .conditioner
+                .count_tokens(sentence)
+                .unwrap_or(MAX_TOKENS_PER_CHUNK);
 
-            if current_chunk.is_empty() {
-                current_chunk = sentence;
-                current_tokens = estimated_tokens;
+            // If a single sentence exceeds max tokens, split it by words
+            if sentence_tokens > MAX_TOKENS_PER_CHUNK {
+                // Flush pending chunk first
+                if !current_chunk.is_empty() {
+                    chunks.push(current_chunk);
+                    current_chunk = String::new();
+                    current_token_count = 0;
+                }
+
+                // Split long sentence using word-batch estimation (~1.3 tokens per word average)
+                // This avoids calling count_tokens for every word (expensive!)
+                let words: Vec<&str> = sentence.split_whitespace().collect();
+                const WORDS_PER_BATCH: usize = 35; // ~45 tokens, safe margin under 50
+
+                for word_batch in words.chunks(WORDS_PER_BATCH) {
+                    let chunk_str = word_batch.join(" ");
+                    // Verify this batch is actually under limit (should almost always pass)
+                    let actual_tokens = self
+                        .conditioner
+                        .count_tokens(&chunk_str)
+                        .unwrap_or(MAX_TOKENS_PER_CHUNK);
+
+                    if actual_tokens <= MAX_TOKENS_PER_CHUNK {
+                        chunks.push(chunk_str);
+                    } else {
+                        // Rare case: batch still too big, split in half recursively
+                        let mid = word_batch.len() / 2;
+                        chunks.push(word_batch[..mid].join(" "));
+                        chunks.push(word_batch[mid..].join(" "));
+                    }
+                }
                 continue;
             }
 
-            if current_tokens + estimated_tokens > max_tokens {
+            // Normal accumulation logic
+            if current_chunk.is_empty() {
+                current_chunk = sentence.to_string();
+                current_token_count = sentence_tokens;
+            } else if current_token_count + sentence_tokens > MAX_TOKENS_PER_CHUNK {
                 chunks.push(current_chunk);
-                current_chunk = sentence;
-                current_tokens = estimated_tokens;
+                current_chunk = sentence.to_string();
+                current_token_count = sentence_tokens;
             } else {
                 current_chunk.push(' ');
-                current_chunk.push_str(&sentence);
-                current_tokens += estimated_tokens;
+                current_chunk.push_str(sentence);
+                current_token_count += sentence_tokens;
             }
         }
 
@@ -605,99 +677,143 @@ impl TTSModel {
     /// let audio = model.generate_with_pauses("Hello... [pause:500ms] world", &voice_state)?;
     /// ```
     pub fn generate_with_pauses(&self, text: &str, voice_state: &ModelState) -> Result<Tensor> {
-        use crate::pause::{parse_text_with_pauses, silence_samples};
+        let mut audio_chunks = Vec::new();
 
-        let parsed = parse_text_with_pauses(text);
-
-        // If no pauses, use normal generation
-        if parsed.pauses.is_empty() {
-            return self.generate(&parsed.clean_text, voice_state);
+        for chunk in self.generate_stream_long(text, voice_state) {
+            audio_chunks.push(chunk?);
         }
 
-        // Generate audio for clean text
-        let audio = self.generate(&parsed.clean_text, voice_state)?;
-        let (channels, _samples) = audio.dims2()?;
-
-        // Calculate total silence to insert
-        let mut total_pause_samples = 0usize;
-        for pause in &parsed.pauses {
-            total_pause_samples += silence_samples(pause.duration_ms, self.sample_rate as u32);
+        // Concatenate all audio chunks
+        if audio_chunks.is_empty() {
+            anyhow::bail!("No audio generated");
         }
+        let audio = Tensor::cat(&audio_chunks, 2)?;
+        // Remove batch dimension
+        let audio = audio.squeeze(0)?;
 
-        if total_pause_samples == 0 {
-            return Ok(audio);
-        }
-
-        // Create silence tensor
-        let silence = Tensor::zeros(
-            (channels, total_pause_samples),
-            audio.dtype(),
-            audio.device(),
-        )?;
-
-        // Concatenate audio and silence
-        // For simplicity, we insert all pauses at the end for now
-        // TODO: Calculate proper insertion points based on character-to-sample mapping
-        let output = Tensor::cat(&[&audio, &silence], 1)?;
-
-        Ok(output)
+        Ok(audio)
     }
 
     /// Generate audio stream from text with voice state
     ///
     /// Returns an iterator that yields audio chunks (one per Mimi frame).
+    /// Generate audio stream from text with voice state
+    ///
+    /// Returns an iterator that yields audio chunks (one per Mimi frame).
+    ///
+    /// This method splits the text into optimal sentences and generates each independently,
+    /// matching Python's behavior to maintain O(N) complexity for long texts.
     pub fn generate_stream<'a, 'b, 'c>(
         &'a self,
         text: &'b str,
         voice_state: &'c ModelState,
     ) -> Box<dyn Iterator<Item = Result<Tensor>> + 'a> {
+        // Split text into chunks to avoid quadratic complexity scaling
+        let chunks = self.split_into_best_sentences(text);
+
+        // Clone voice state so the iterator owns a copy, untied from lifetime 'c
+        let voice_state_owned = voice_state.clone();
+
+        // Create an iterator that processes each chunk sequentially
+        let iterator = chunks.into_iter().flat_map(move |chunk_text| {
+            // We need to return an iterator for each chunk.
+            // We pass a reference to the owned voice state captured by the closure.
+            self.generate_stream_segment(chunk_text, &voice_state_owned)
+        });
+
+        Box::new(iterator)
+    }
+
+    /// Internal helper to generate a single segment (short text) matching Python's _generate
+    fn generate_stream_segment(
+        &self,
+        text: String,
+        voice_state: &ModelState,
+    ) -> Box<dyn Iterator<Item = Result<Tensor>>> {
         let mut state = voice_state.clone();
         let mut mimi_state = init_states(1, 1000);
 
         // Prepare text
-        let prepared_text = prepare_text_prompt(text);
-        let tokens = self
-            .conditioner
-            .prepare(&prepared_text, &self.device)
-            .unwrap(); // FIXME: handle error
-        let text_embeddings = self.conditioner.forward(&tokens).unwrap();
+        let prepared_text = prepare_text_prompt(&text);
+
+        // Error handling for preparation failures inside the iterator
+        let tokens = match self.conditioner.prepare(&prepared_text, &self.device) {
+            Ok(t) => t,
+            Err(e) => return Box::new(std::iter::once(Err(e))),
+        };
+
+        let text_embeddings = match self.conditioner.forward(&tokens) {
+            Ok(e) => e,
+            Err(e) => return Box::new(std::iter::once(Err(e))),
+        };
 
         // Initial text prompt
-        let _ = self
+        if let Err(e) = self
             .flow_lm
             .transformer
-            .forward(&text_embeddings, &mut state)
-            .unwrap();
+            .forward(&text_embeddings, &mut state, 0)
+        {
+            return Box::new(std::iter::once(Err(anyhow::Error::from(e))));
+        }
 
-        // Increment FlowLM state after text prompting (critical for RoPE)
-        // Python: increment_steps(self.flow_lm, model_state, increment=text_embeddings.shape[1])
-        let text_len = text_embeddings.dims()[1];
-        increment_steps(&mut state, "offset", text_len);
+        // Removed redundant increment_steps("offset") - handled internally by RoPE/Attention with current_end_len
 
         let max_gen_len = (prepared_text.split_whitespace().count() + 2) * 13;
-        let frames_after_eos = estimate_frames_after_eos(text);
+        let frames_after_eos = estimate_frames_after_eos(&text);
 
-        let mut backbone_input = self
-            .flow_lm
-            .bos_emb
-            .clone()
-            .reshape((1, 1, self.ldim))
-            .unwrap();
+        let mut backbone_input = match self.flow_lm.bos_emb.clone().reshape((1, 1, self.ldim)) {
+            Ok(t) => t,
+            Err(e) => return Box::new(std::iter::once(Err(anyhow::Error::from(e)))),
+        };
+
         let mut eos_step: Option<usize> = None;
         let mut finished = false;
+
+        // We need to move 'self' (reference) and owned data into the closure
+        // But 'self' is in `generate_stream` lifetime?
+        // We clone needed cheap things or use references.
+        // `flow_lm`, `mimi` are part of self.
+        // The closure will borrow `self`.
+
+        // To make the iterator valid 'static or bound to self, we use move.
+        // But we need access to self inside.
+        // We can clone `self` if cheap? No, TTSModel is large (holds models).
+        // But TTSModel derives Clone! And models are wrappers around Arcs (Candle tensors/vars).
+        // So cloning TTSModel is CHEAP (shallow copy of Arc pointers).
+        let model = self.clone();
+
+        // Pre-compute time embeddings for the entire segment to avoid re-computing every frame
+        // Now returns a single batched Tensor [num_steps, channels]
+        let time_embeddings = match model.flow_lm.flow_net.compute_time_embeddings(
+            model.lsd_decode_steps,
+            &model.device,
+            DType::F32,
+        ) {
+            Ok(te) => te,
+            Err(e) => return Box::new(std::iter::once(Err(anyhow::Error::from(e)))),
+        };
+
+        let empty_text_embeddings =
+            Tensor::zeros((1, 0, model.dim), DType::F32, &model.device).unwrap();
 
         Box::new((0..max_gen_len).map_while(move |step| {
             if finished {
                 return None;
             }
 
-            let (next_latent, is_eos) = match self.flow_lm.forward(
+            // Text embeddings are already processed into state during initialization (line 752-757),
+            // so we always pass empty text embeddings during autoregressive generation.
+            // Passing text_embeddings again would cause duplicate/repeated speech.
+            let text_tokens_to_pass = &empty_text_embeddings;
+
+            let (next_latent, is_eos) = match model.flow_lm.forward(
                 &backbone_input,
-                &Tensor::zeros((1, 0, self.dim), DType::F32, &self.device).unwrap(),
+                text_tokens_to_pass,
                 &mut state,
-                self.lsd_decode_steps,
-                self.temp,
-                self.eos_threshold,
+                &time_embeddings,
+                model.temp,
+                model.eos_threshold,
+                step,
             ) {
                 Ok(res) => res,
                 Err(e) => return Some(Err(anyhow::anyhow!(e))),
@@ -705,19 +821,17 @@ impl TTSModel {
 
             let audio_frame = match (|| -> Result<Tensor> {
                 let next_latent_denorm = next_latent
-                    .broadcast_mul(&self.flow_lm.emb_std)?
-                    .broadcast_add(&self.flow_lm.emb_mean)?;
+                    .broadcast_mul(&model.flow_lm.emb_std)?
+                    .broadcast_add(&model.flow_lm.emb_mean)?;
 
                 let mimi_input = next_latent_denorm.unsqueeze(1)?.transpose(1, 2)?;
-                let quantized = self.mimi.quantize(&mimi_input)?;
-                let audio = self
+                let quantized = model.mimi.quantize(&mimi_input)?;
+                let audio = model
                     .mimi
-                    .decode_from_latent(&quantized, &mut mimi_state)
+                    .decode_from_latent(&quantized, &mut mimi_state, step)
                     .map_err(|e| anyhow::anyhow!(e))?;
 
-                // Increment mimi state after decode (critical for streaming)
-                // Python: increment_steps(self.mimi, mimi_state, increment=16)
-                increment_steps(&mut mimi_state, "offset", 16);
+                // Removed redundant increment_steps("offset") for mimi
 
                 Ok(audio)
             })() {
@@ -737,9 +851,7 @@ impl TTSModel {
 
             backbone_input = next_latent.unsqueeze(1).unwrap();
 
-            // Increment FlowLM state after each generation step (critical for RoPE)
-            // Python: increment_steps(self.flow_lm, model_state, increment=1)
-            increment_steps(&mut state, "offset", 1);
+            // Removed redundant increment_steps("offset") for FlowLM - handled by attention state
 
             Some(Ok(audio_frame))
         }))
@@ -751,25 +863,65 @@ impl TTSModel {
         text: &str,
         voice_state: &'a ModelState,
     ) -> impl Iterator<Item = Result<Tensor>> + 'a {
-        // Use the Python-parity splitting logic that respects token counts
-        let segments = self.split_into_best_sentences(text);
+        use crate::pause::{parse_text_with_pauses, silence_samples};
 
-        let model = self; // Capture self
-        // We capture the reference 'voice_state'. It lives as long as 'a.
-        // The closure moves it in, but it's a reference, so it's copied.
-        // We do NOT need to clone the object itself here.
+        let parsed = parse_text_with_pauses(text);
+        let mut segments = Vec::new();
 
-        segments.into_iter().flat_map(move |segment| {
-            // Re-clone the initial voice state for each segment to reset FlowLM context
-            // This ensures we don't hit position embedding limits and keeps segments clean.
-            // Concatenation of audio should be seamless enough if segments are well-formed.
-            model.generate_stream(&segment, voice_state)
+        // Interleave text chunks and pauses
+        let mut last_pos = 0;
+        for pause in &parsed.pauses {
+            if pause.position > last_pos {
+                let text_seg = &parsed.clean_text[last_pos..pause.position];
+                if !text_seg.trim().is_empty() {
+                    segments.push(Segment::Text(text_seg.to_string()));
+                }
+            }
+            segments.push(Segment::Pause(pause.duration_ms));
+
+            // Explicit pauses were replaced by a single space in clean_text
+            // Natural pauses (commas, ellipses) are still in clean_text
+            if pause.original.starts_with("[pause:") {
+                last_pos = pause.position + 1;
+            } else {
+                last_pos = pause.position + pause.original.len();
+            }
+        }
+        if last_pos < parsed.clean_text.len() {
+            let text_seg = &parsed.clean_text[last_pos..];
+            if !text_seg.trim().is_empty() {
+                segments.push(Segment::Text(text_seg.to_string()));
+            }
+        }
+
+        let model = self;
+        segments.into_iter().flat_map(move |seg| match seg {
+            Segment::Text(s) => {
+                let iter = model.generate_stream(&s, voice_state);
+                Box::new(iter) as Box<dyn Iterator<Item = Result<Tensor>>>
+            }
+            Segment::Pause(ms) => {
+                let n_samples = silence_samples(ms, model.sample_rate as u32);
+                let silence_res = Tensor::zeros(
+                    (1, model.mimi.channels, n_samples),
+                    DType::F32,
+                    &model.device,
+                );
+                Box::new(std::iter::once(silence_res.map_err(anyhow::Error::from)))
+                    as Box<dyn Iterator<Item = Result<Tensor>>>
+            }
         })
     }
     pub fn estimate_generation_steps(&self, text: &str) -> usize {
         let prepared = prepare_text_prompt(text);
         (prepared.split_whitespace().count() + 2) * 13
     }
+}
+
+/// Internal segment type for interleaving text and pauses
+enum Segment {
+    Text(String),
+    Pause(u32),
 }
 
 /// Find the config file path for a variant
@@ -862,7 +1014,7 @@ fn prepare_text_prompt(text: &str) -> String {
 }
 
 /// Estimate frames after EOS based on text length
-fn estimate_frames_after_eos(text: &str) -> usize {
+pub fn estimate_frames_after_eos(text: &str) -> usize {
     let word_count = text.split_whitespace().count();
     if word_count <= 4 {
         3 + 2 // prepare_text_prompt guess + 2

@@ -10,10 +10,14 @@ keywords.workspace = true
 categories.workspace = true
 
 [features]
+default = ["web-ui"]
+web-ui = ["rust-embed", "mime_guess", "percent-encoding", "pocket-tts/quantized"]
 quantized = ["pocket-tts/quantized"]
+metal = ["pocket-tts/metal", "candle-core/metal"]
+mkl = ["pocket-tts/mkl"]
 
 [dependencies]
-pocket-tts = { path = "../pocket-tts", version = "0.1.1" }
+pocket-tts = { path = "../pocket-tts", version = "0.1.2" }
 candle-core.workspace = true
 anyhow.workspace = true
 clap = { workspace = true, features = ["derive"] }
@@ -30,9 +34,9 @@ tower-http = { workspace = true, features = ["fs", "trace", "cors"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 owo-colors = "4"
-rust-embed = "8"
-mime_guess = "2"
-percent-encoding = "2.3"
+rust-embed = { version = "8", optional = true }
+mime_guess = { version = "2", optional = true }
+percent-encoding = { version = "2.3", optional = true }
 
 [dev-dependencies]
 assert_cmd = "2.0"

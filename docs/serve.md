@@ -12,6 +12,12 @@ pocket-tts serve
 
 This starts a server on `http://localhost:8000` with the default voice.
 
+> [!TIP]
+> **Lite Build:** You can build a "lite" version of the server without the web interface assets by using `--no-default-features`. This is useful for environments where binary size is a concern or only the API is needed.
+> ```bash
+> cargo build --release -p pocket-tts-cli --no-default-features
+> ```
+
 ## Command Options
 
 - `--host HOST`: Host address to bind (default: `127.0.0.1`)

@@ -1,37 +1,27 @@
 use crate::ModelState;
 use crate::models::transformer::StreamingTransformer;
-use crate::modules::mlp::{LayerNorm, SimpleMLPAdaLN};
+use crate::modules::mlp::{LayerNorm, ModulationParams, SimpleMLPAdaLN};
 use candle_core::{Result, Tensor};
 use candle_nn::{Linear, Module, VarBuilder};
 
 pub fn lsd_decode(
     flow_net: &SimpleMLPAdaLN,
-    cond: &Tensor,
+    modulations: &[Vec<ModulationParams>],
     x_0: &Tensor,
-    num_steps: usize,
 ) -> Result<Tensor> {
     let mut current = x_0.clone();
-    let dev = x_0.device();
-    let dtype = x_0.dtype();
+    let num_steps = modulations.len();
 
-    for i in 0..num_steps {
-        let s = i as f64 / num_steps as f64;
-        let t = (i + 1) as f64 / num_steps as f64;
-
-        // Timesteps should be 1D with batch size [B], not [B, D]
-        let batch_size = cond.dims()[0];
-        let s_tensor = Tensor::full(s as f32, (batch_size,), dev)?.to_dtype(dtype)?;
-        let t_tensor = Tensor::full(t as f32, (batch_size,), dev)?.to_dtype(dtype)?;
-
-        // SimpleMLPAdaLN.forward(cond, s, t, x)
-        // Here cond is the transformer output.
-        // x_0 is the noise.
-        let flow_dir = flow_net.forward(cond, &s_tensor, &t_tensor, &current)?;
-        current = (current + (flow_dir / num_steps as f64)?)?;
+    let step_factor = 1.0 / num_steps as f64;
+    for step_mod in modulations {
+        // Use forward_step_cached with pre-computed modulation batch for this ODE step
+        let flow_dir = flow_net.forward_step_cached(&current, step_mod)?;
+        current = (current + flow_dir.affine(step_factor, 0.0)?)?;
     }
     Ok(current)
 }
 
+#[derive(Clone)]
 pub struct FlowLMModel {
     pub flow_net: SimpleMLPAdaLN,
     pub transformer: StreamingTransformer,
@@ -43,6 +33,35 @@ pub struct FlowLMModel {
     pub emb_std: Tensor,
     pub ldim: usize,
     pub dim: usize,
+    pub noise_clamp: Option<f32>,
+}
+
+fn sample_noise(
+    device: &candle_core::Device,
+    shape: (usize, usize),
+    temp: f32,
+    clamp: Option<f32>,
+) -> Result<Tensor> {
+    let std = temp.sqrt();
+    match clamp {
+        None => Tensor::randn(0.0f32, std, shape, device),
+        Some(limit) => {
+            // Rejection sampling for truncated normal
+            let count = shape.0 * shape.1;
+            let mut data = Vec::with_capacity(count);
+            let mut rng = rand::thread_rng();
+            let dist = rand_distr::Normal::new(0.0f32, std)
+                .map_err(|e| candle_core::Error::Msg(e.to_string()))?;
+
+            while data.len() < count {
+                let v = rand_distr::Distribution::sample(&dist, &mut rng);
+                if v.abs() <= limit {
+                    data.push(v);
+                }
+            }
+            Tensor::from_vec(data, shape, device)
+        }
+    }
 }
 
 impl FlowLMModel {
@@ -71,17 +90,20 @@ impl FlowLMModel {
             emb_std,
             ldim,
             dim,
+            noise_clamp: None, // Default to no clamp
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn forward(
         &self,
         sequence: &Tensor,
         text_embeddings: &Tensor,
         model_state: &mut ModelState,
-        lsd_decode_steps: usize,
+        time_embeddings: &Tensor,
         temp: f32,
         eos_threshold: f32,
+        step: usize,
     ) -> Result<(Tensor, bool)> {
         // sequence is [B, T, ldim]
         // text_embeddings is [B, S, dim]
@@ -94,16 +116,20 @@ impl FlowLMModel {
         // Let's assume BOS is handled by caller for now or if sequence empty.
 
         let x = self.input_linear.forward(sequence)?;
-
-        // Cat text embeddings and sequence embeddings
-        let input = Tensor::cat(&[text_embeddings, &x], 1)?;
-
-        let mut transformer_out = self.transformer.forward(&input, model_state)?;
-        transformer_out = self.out_norm.forward(&transformer_out)?;
-
-        // Remove prefix (text embeddings length)
         let s_len = text_embeddings.dims()[1];
-        transformer_out = transformer_out.narrow(1, s_len, transformer_out.dims()[1] - s_len)?;
+
+        // Cat text embeddings and sequence embeddings only if text_embeddings is not empty
+        let transformer_out_pre_norm = if s_len > 0 {
+            let input = Tensor::cat(&[text_embeddings, &x], 1)?;
+            let mut out = self.transformer.forward(&input, model_state, step)?;
+            // Remove prefix (text embeddings length)
+            out = out.narrow(1, s_len, out.dims()[1] - s_len)?;
+            out
+        } else {
+            self.transformer.forward(&x, model_state, step)?
+        };
+
+        let transformer_out = self.out_norm.forward(&transformer_out_pre_norm)?;
 
         // Only use the last frame for generation
         let last_frame = transformer_out
@@ -118,15 +144,21 @@ impl FlowLMModel {
             .to_scalar::<f32>()?;
         let is_eos = eos_score > eos_threshold;
 
-        // Generate noise
-        let noise = Tensor::randn(
-            0.0f32,
-            temp.sqrt(),
-            (last_frame.dims()[0], self.ldim),
+        // Generate noise with optional clamping
+        let noise = sample_noise(
             last_frame.device(),
+            (last_frame.dims()[0], self.ldim),
+            temp,
+            self.noise_clamp,
         )?;
 
-        let next_latent = lsd_decode(&self.flow_net, &last_frame, &noise, lsd_decode_steps)?;
+        // Pre-compute all modulations for this frame's ODE steps (8 steps * N blocks) in batch
+        let c_emb = self.flow_net.embed_condition(&last_frame)?;
+        let modulations = self
+            .flow_net
+            .precompute_modulations(&c_emb, time_embeddings)?;
+
+        let next_latent = lsd_decode(&self.flow_net, &modulations, &noise)?;
 
         Ok((next_latent, is_eos))
     }

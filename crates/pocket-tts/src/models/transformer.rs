@@ -5,6 +5,7 @@ use crate::modules::rope::RotaryEmbedding;
 use candle_core::{Result, Tensor};
 use candle_nn::{Linear, Module, VarBuilder};
 
+#[derive(Clone)]
 pub struct StreamingTransformerLayer {
     self_attn: StreamingMultiheadAttention,
     norm1: LayerNorm,
@@ -61,10 +62,18 @@ impl StreamingTransformerLayer {
         })
     }
 
-    pub fn forward(&self, x: &Tensor, model_state: &mut ModelState) -> Result<Tensor> {
+    pub fn forward(
+        &self,
+        x: &Tensor,
+        model_state: &mut ModelState,
+        current_pos: usize,
+        current_len: usize,
+    ) -> Result<Tensor> {
         let x_orig = x.clone();
         let h = self.norm1.forward(x)?;
-        let mut update = self.self_attn.forward(&h, model_state)?;
+        let mut update = self
+            .self_attn
+            .forward(&h, model_state, current_pos, current_len)?;
         if let Some(ls) = &self.layer_scale_1 {
             update = ls.forward(&update)?;
         }
@@ -80,9 +89,11 @@ impl StreamingTransformerLayer {
     }
 }
 
+#[derive(Clone)]
 pub struct StreamingTransformer {
     layers: Vec<StreamingTransformerLayer>,
     _rope: RotaryEmbedding,
+    name: String,
 }
 
 impl StreamingTransformer {
@@ -99,7 +110,7 @@ impl StreamingTransformer {
         name: &str,
         vb: VarBuilder,
     ) -> Result<Self> {
-        let rope = RotaryEmbedding::new(max_period);
+        let rope = RotaryEmbedding::new(max_period, d_model / num_heads, vb.device())?;
         let mut layers = Vec::new();
         for i in 0..num_layers {
             layers.push(StreamingTransformerLayer::new(
@@ -117,18 +128,38 @@ impl StreamingTransformer {
         Ok(Self {
             layers,
             _rope: rope,
+            name: name.to_string(),
         })
     }
 
-    pub fn forward(&self, x: &Tensor, model_state: &mut ModelState) -> Result<Tensor> {
+    pub fn forward(
+        &self,
+        x: &Tensor,
+        model_state: &mut ModelState,
+        _step: usize,
+    ) -> Result<Tensor> {
         let mut x = x.clone();
+        // Fetch current_pos once from the first attention layer's state to avoid redundant to_scalar calls.
+        let first_layer_name = format!("{}.layers.0.self_attn", self.name);
+        let current_pos = model_state
+            .get(&first_layer_name)
+            .and_then(|s| s.get("pos"))
+            .and_then(|t| t.to_scalar::<u32>().ok())
+            .unwrap_or(0) as usize;
+        let current_len = model_state
+            .get(&first_layer_name)
+            .and_then(|s| s.get("l"))
+            .and_then(|t| t.to_scalar::<i64>().ok())
+            .unwrap_or(0) as usize;
+
         for layer in &self.layers {
-            x = layer.forward(&x, model_state)?;
+            x = layer.forward(&x, model_state, current_pos, current_len)?;
         }
         Ok(x)
     }
 }
 
+#[derive(Clone)]
 pub struct ProjectedTransformer {
     transformer: StreamingTransformer,
     input_proj: Option<Linear>,
@@ -199,13 +230,18 @@ impl ProjectedTransformer {
         })
     }
 
-    pub fn forward(&self, x: &Tensor, model_state: &mut ModelState) -> Result<Vec<Tensor>> {
+    pub fn forward(
+        &self,
+        x: &Tensor,
+        model_state: &mut ModelState,
+        step: usize,
+    ) -> Result<Vec<Tensor>> {
         // x is [B, C, T]
         let mut x = x.transpose(1, 2)?; // [B, T, C]
         if let Some(proj) = &self.input_proj {
             x = proj.forward(&x)?;
         }
-        let z = self.transformer.forward(&x, model_state)?;
+        let z = self.transformer.forward(&x, model_state, step)?;
 
         let mut ys = Vec::new();
         for output_proj in &self.output_projs {

@@ -2,37 +2,37 @@
 
 use crate::server::state::AppState;
 use crate::voice::resolve_voice;
+#[cfg(feature = "web-ui")]
+use axum::response::Html;
 use axum::{
     Json,
     body::Body,
     extract::{Multipart, State},
     http::{HeaderMap, StatusCode, header},
-    response::{Html, IntoResponse, Response},
+    response::{IntoResponse, Response},
 };
+#[cfg(feature = "web-ui")]
 use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 use tokio_stream::StreamExt as _;
 
 // Embed static files at compile time
+#[cfg(feature = "web-ui")]
 #[derive(Embed)]
-#[folder = "static/"]
+#[folder = "web/dist"]
 struct StaticAssets;
 
 // ============================================================================
 // Static file serving
 // ============================================================================
 
-/// Serve the main index.html
-pub async fn serve_index() -> impl IntoResponse {
-    match StaticAssets::get("index.html") {
-        Some(content) => Html(content.data.to_vec()).into_response(),
-        None => (StatusCode::NOT_FOUND, "index.html not found").into_response(),
-    }
-}
-
 /// Serve static files (CSS, JS, images)
+#[cfg(feature = "web-ui")]
 pub async fn serve_static(uri: axum::http::Uri) -> impl IntoResponse {
     let path = uri.path().trim_start_matches('/');
+
+    // If path is empty, serve index.html
+    let path = if path.is_empty() { "index.html" } else { path };
     let path = percent_encoding::percent_decode_str(path).decode_utf8_lossy();
 
     match StaticAssets::get(&path) {
@@ -42,7 +42,16 @@ pub async fn serve_static(uri: axum::http::Uri) -> impl IntoResponse {
             headers.insert(header::CONTENT_TYPE, mime.as_ref().parse().unwrap());
             (headers, content.data.to_vec()).into_response()
         }
-        None => (StatusCode::NOT_FOUND, "File not found").into_response(),
+        None => {
+            // If the request doesn't match a static file, return index.html (for SPA routing)
+            // But only if it doesn't look like a file request (to avoid infinite loops on 404s)
+            if !path.contains('.')
+                && let Some(content) = StaticAssets::get("index.html")
+            {
+                return Html(content.data.to_vec()).into_response();
+            }
+            (StatusCode::NOT_FOUND, "File not found").into_response()
+        }
     }
 }
 
@@ -71,6 +80,10 @@ pub async fn health_check() -> impl IntoResponse {
 pub struct GenerateRequest {
     text: String,
     voice: Option<String>,
+    temperature: Option<f32>,
+    lsd_steps: Option<usize>,
+    eos_threshold: Option<f32>,
+    noise_clamp: Option<f32>,
 }
 
 #[derive(Serialize)]
@@ -99,10 +112,25 @@ pub async fn generate(
             (*default_voice).clone()
         };
 
+        // Override model params if provided in request
+        let mut model_cloned = (*model).clone();
+        if let Some(t) = payload.temperature {
+            model_cloned.temp = t;
+        }
+        if let Some(s) = payload.lsd_steps {
+            model_cloned.lsd_decode_steps = s;
+        }
+        if let Some(e) = payload.eos_threshold {
+            model_cloned.eos_threshold = e;
+        }
+        if let Some(nc) = payload.noise_clamp {
+            model_cloned.noise_clamp = Some(nc);
+        }
+
         // Generate audio
         tracing::info!("Starting generation for text length: {} chars", text.len());
         let mut audio_chunks = Vec::new();
-        for chunk in model.generate_stream_long(&text, &voice_state) {
+        for chunk in model_cloned.generate_stream_long(&text, &voice_state) {
             audio_chunks.push(chunk?);
         }
         if audio_chunks.is_empty() {
@@ -178,12 +206,30 @@ pub async fn generate_stream(
                 (*default_voice).clone()
             };
 
+            // Override model params if provided in request
+            let mut model_cloned = (*model).clone();
+            if let Some(t) = payload.temperature {
+                model_cloned.temp = t;
+            }
+            if let Some(s) = payload.lsd_steps {
+                model_cloned.lsd_decode_steps = s;
+            }
+            if let Some(e) = payload.eos_threshold {
+                model_cloned.eos_threshold = e;
+            }
+            if let Some(nc) = payload.noise_clamp {
+                model_cloned.noise_clamp = Some(nc);
+            }
+
             // Stream audio chunks
             tracing::info!(
                 "Starting streaming generation for text length: {} chars",
                 text.len()
             );
-            for (i, chunk_res) in model.generate_stream_long(&text, &voice_state).enumerate() {
+            for (i, chunk_res) in model_cloned
+                .generate_stream_long(&text, &voice_state)
+                .enumerate()
+            {
                 if i > 0 && i % 20 == 0 {
                     tracing::info!("Generated chunk {}", i);
                 }
@@ -223,10 +269,14 @@ pub async fn generate_stream(
 
     // Convert channel to stream
     let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
-    let body_stream = stream.map(|res| match res {
-        Ok(bytes) => Ok(axum::body::Bytes::from(bytes)),
-        Err(e) => Err(std::io::Error::other(e.to_string())),
-    });
+    let body_stream = stream.map(
+        |res| -> std::result::Result<axum::body::Bytes, std::io::Error> {
+            match res {
+                Ok(bytes) => Ok(axum::body::Bytes::from(bytes)),
+                Err(e) => Err(std::io::Error::other(e.to_string())),
+            }
+        },
+    );
 
     Response::builder()
         .header(header::CONTENT_TYPE, "application/octet-stream")
@@ -286,7 +336,18 @@ pub async fn tts_form(State(state): State<AppState>, mut multipart: Multipart) -
     };
 
     // Delegate to JSON generate handler
-    generate(State(state), Json(GenerateRequest { text, voice })).await
+    generate(
+        State(state),
+        Json(GenerateRequest {
+            text,
+            voice,
+            temperature: None,
+            lsd_steps: None,
+            eos_threshold: None,
+            noise_clamp: None,
+        }),
+    )
+    .await
 }
 
 // ============================================================================
@@ -307,6 +368,10 @@ pub async fn openai_speech(state: State<AppState>, Json(payload): Json<OpenAIReq
     let req = GenerateRequest {
         text: payload.input,
         voice: payload.voice,
+        temperature: None,
+        lsd_steps: None,
+        eos_threshold: None,
+        noise_clamp: None,
     };
     generate(state, Json(req)).await
 }
