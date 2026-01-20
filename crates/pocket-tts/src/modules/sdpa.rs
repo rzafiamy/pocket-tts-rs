@@ -45,7 +45,7 @@ pub fn sdpa(
         // so we can skip mask generation.
         // Even with a context window, the attention.rs logic now prunes the KV cache
         // to that window, so we can skip the windowed mask here as well.
-        let scores = if is_causal && q_len > 1 {
+        let scores = if is_causal || context_window.is_some() {
             let mask = generate_mask_chunk(
                 0,
                 q_len,

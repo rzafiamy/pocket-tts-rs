@@ -115,7 +115,7 @@ impl StreamingMultiheadAttention {
 
         // KV Cache Management with Doubling Buffer
         // We take ownership from the state to avoid clones and ensure uniqueness for slice_set
-        let (mut k_buf, mut v_buf, mut current_len) =
+        let (mut k_buf, mut v_buf, current_len) =
             match (module_state.remove("k_buf"), module_state.remove("v_buf")) {
                 (Some(kb), Some(vb)) => (kb, vb, current_len),
                 _ => {
@@ -129,33 +129,62 @@ impl StreamingMultiheadAttention {
             };
 
         let cap = k_buf.dim(2)?; // Current capacity of the buffer
-        let q_len = q.dim(2)?; // Length of the current query/key/value batch
 
-        if let Some(window_size) = self.context {
+        let (kc, vc, k_buf, v_buf, current_len) = if let Some(window_size) = self.context {
             // Windowed Attention (Mimi)
-            // If we exceed window_size, we shift the buffer left.
-            // This is slightly less efficient than a ring buffer but keeps the sequence linear for RoPE.
-            // Since window_size is small (e.g. 1024), the copy is negligible compared to masking overhead.
-            if current_len + q_len > window_size {
-                let shift = (current_len + q_len).saturating_sub(window_size);
-                let to_move = current_len.saturating_sub(shift);
-                if to_move > 0 {
-                    let k_to_move = k_buf.narrow(2, shift, to_move)?;
-                    let v_to_move = v_buf.narrow(2, shift, to_move)?;
-                    k_buf.slice_set(&k_to_move.contiguous()?, 2, 0)?;
-                    v_buf.slice_set(&v_to_move.contiguous()?, 2, 0)?;
-                    current_len = to_move;
+            // If the current batch is larger than or equal to the window size,
+            // we can't just slice_set. We needs to handle the overflow by
+            // producing a concatenated KV for the current call and a truncated
+            // buffer for the next call.
+            if t >= window_size {
+                let kc = if current_len > 0 {
+                    Tensor::cat(&[&k_buf.narrow(2, 0, current_len)?, &k], 2)?
                 } else {
-                    current_len = 0;
+                    k.clone()
+                };
+                let vc = if current_len > 0 {
+                    Tensor::cat(&[&v_buf.narrow(2, 0, current_len)?, &v], 2)?
+                } else {
+                    v.clone()
+                };
+
+                // For the next state, we only keep the last window_size
+                let next_kb = kc
+                    .narrow(2, kc.dim(2)? - window_size, window_size)?
+                    .contiguous()?;
+                let next_vb = vc
+                    .narrow(2, vc.dim(2)? - window_size, window_size)?
+                    .contiguous()?;
+                (kc, vc, next_kb, next_vb, window_size)
+            } else {
+                // Standard streaming / small batch path
+                let mut current_len = current_len;
+                if current_len + t > window_size {
+                    let shift = (current_len + t).saturating_sub(window_size);
+                    let to_move = current_len.saturating_sub(shift);
+                    if to_move > 0 {
+                        let k_to_move = k_buf.narrow(2, shift, to_move)?;
+                        let v_to_move = v_buf.narrow(2, shift, to_move)?;
+                        k_buf.slice_set(&k_to_move.contiguous()?, 2, 0)?;
+                        v_buf.slice_set(&v_to_move.contiguous()?, 2, 0)?;
+                        current_len = to_move;
+                    } else {
+                        current_len = 0;
+                    }
                 }
+                k_buf.slice_set(&k.contiguous()?, 2, current_len)?;
+                v_buf.slice_set(&v.contiguous()?, 2, current_len)?;
+                let next_len = current_len + t;
+
+                // Get current KV for attention
+                let kc = k_buf.narrow(2, 0, next_len)?;
+                let vc = v_buf.narrow(2, 0, next_len)?;
+                (kc, vc, k_buf, v_buf, next_len)
             }
-            k_buf.slice_set(&k.contiguous()?, 2, current_len)?;
-            v_buf.slice_set(&v.contiguous()?, 2, current_len)?;
-            current_len += q_len;
         } else {
             // Linear Attention (FlowLM) with Doubling Buffer
-            if current_len + q_len > cap {
-                let new_cap = (current_len + q_len).next_power_of_two();
+            if current_len + t > cap {
+                let new_cap = (current_len + t).next_power_of_two();
                 let zeros_shape = (b, self.num_heads, new_cap - cap, d);
                 let k_zeros = Tensor::zeros(zeros_shape, q.dtype(), q.device())?;
                 let v_zeros = Tensor::zeros(zeros_shape, q.dtype(), q.device())?;
@@ -164,12 +193,13 @@ impl StreamingMultiheadAttention {
             }
             k_buf.slice_set(&k.contiguous()?, 2, current_len)?;
             v_buf.slice_set(&v.contiguous()?, 2, current_len)?;
-            current_len += q_len;
-        }
+            let next_len = current_len + t;
 
-        // Prepare current KV for attention
-        let kc = k_buf.narrow(2, 0, current_len)?;
-        let vc = v_buf.narrow(2, 0, current_len)?;
+            // Get current KV for attention
+            let kc = k_buf.narrow(2, 0, next_len)?;
+            let vc = v_buf.narrow(2, 0, next_len)?;
+            (kc, vc, k_buf, v_buf, next_len)
+        };
 
         // Update state
         module_state.insert("k_buf".to_string(), k_buf);
@@ -186,8 +216,12 @@ impl StreamingMultiheadAttention {
         // Scaled dot-product attention
         let scale = 1.0 / (d as f64).sqrt();
         let x = crate::modules::sdpa::sdpa(
-            &q, &kc, &vc, scale, true, // is_causal
-            None, // context_window (already handled by pruning KV cache)
+            &q,
+            &kc,
+            &vc,
+            scale,
+            true, // is_causal
+            self.context,
         )?;
 
         // Transpose back to [B, T, H, D] and project out
