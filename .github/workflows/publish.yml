@@ -25,11 +25,11 @@ jobs:
           bun install
           bun run build
       - name: Publish pocket-tts
-        run: cargo publish -p pocket-tts
+        run: cargo publish -p pocket-tts --allow-dirty
       - name: Publish pocket-tts-cli
         run: |
           sleep 10 # Wait for crates.io to index common dependency
-          cargo publish -p pocket-tts-cli
+          cargo publish -p pocket-tts-cli --allow-dirty
       
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -38,13 +38,14 @@ jobs:
             assets/*.wav
             assets/*.safetensors
           body: |
-            ## Pocket TTS v0.2.4 (Release Infrastructure Fix)
+            ## Pocket TTS v0.2.5 (Publish Pipeline Final Fix)
             
-            This release fixes an issue where web assets were missing from the crate package during publish.
+            This release fixes a "dirty working directory" error during CI publish by adding the `--allow-dirty` flag for crates with generated assets.
             
             ### Key Changes
+            - Added `--allow-dirty` to `cargo publish` in CI
+            - Synchronized all crate versions to 0.2.5
             - Explicitly included `web/dist` in `pocket-tts-cli` package
-            - Synchronized all crate versions to 0.2.4
             - Fixed `server_tests.rs` static asset routing failure
             - Fixed `StreamingMultiheadAttention` for voice cloning prefill
             - Restored numerical parity with reference Python implementation
