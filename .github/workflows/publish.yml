@@ -38,13 +38,16 @@ jobs:
             assets/*.wav
             assets/*.safetensors
           body: |
-            ## Pocket TTS v0.2.5 (Publish Pipeline Final Fix)
+            ## Pocket TTS v0.3.0 (Cross-Platform Stability Release)
             
-            This release fixes a "dirty working directory" error during CI publish by adding the `--allow-dirty` flag for crates with generated assets.
+            This release focuses on cross-platform stability and fixes critical issues for macOS (M1/M2) users.
             
             ### Key Changes
+            - Bundled `.cargo/config.toml` with explicit M1 target features (`+aes`, `+sha2`)
+            - Synchronized all crate versions to 0.3.0
+            - Expanded CI to Multi-OS Matrix (Linux, macOS, Windows)
+            - Fixed `ring` crate compilation failure on Apple Silicon
             - Added `--allow-dirty` to `cargo publish` in CI
-            - Synchronized all crate versions to 0.2.5
             - Explicitly included `web/dist` in `pocket-tts-cli` package
             - Fixed `server_tests.rs` static asset routing failure
             - Fixed `StreamingMultiheadAttention` for voice cloning prefill

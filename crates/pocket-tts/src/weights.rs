@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use candle_core::Device;
 
 #[cfg(not(target_arch = "wasm32"))]
-use hf_hub::api::tokio::ApiBuilder;
+use hf_hub::api::sync::ApiBuilder;
 #[cfg(not(target_arch = "wasm32"))]
 use hf_hub::{Repo, RepoType};
 
@@ -40,11 +40,6 @@ pub fn download_if_necessary(file_path: &str) -> Result<PathBuf> {
         // Use ApiBuilder to support HF_TOKEN from environment
         let token = std::env::var("HF_TOKEN").ok();
 
-        // Use a local tokio runtime to wrap the async API call
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()?;
-
         let api = ApiBuilder::new().with_token(token).build()?;
 
         // Create repo with or without revision
@@ -55,7 +50,7 @@ pub fn download_if_necessary(file_path: &str) -> Result<PathBuf> {
         };
 
         let api_repo = api.repo(repo);
-        let path = rt.block_on(api_repo.get(&filename))?;
+        let path = api_repo.get(&filename)?;
         Ok(path)
     } else {
         Ok(PathBuf::from(file_path))

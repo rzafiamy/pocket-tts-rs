@@ -8,7 +8,7 @@ repository.workspace = true
 description = "CLI and API server for Pocket TTS"
 keywords.workspace = true
 categories.workspace = true
-include = ["src/**/*", "Cargo.toml", "web/dist/**/*", "tests/**/*"]
+include = ["src/**/*", "Cargo.toml", "web/dist/**/*", "tests/**/*", "../../.cargo/config.toml"]
 
 [features]
 default = ["web-ui"]
@@ -18,7 +18,7 @@ metal = ["pocket-tts/metal", "candle-core/metal"]
 mkl = ["pocket-tts/mkl"]
 
 [dependencies]
-pocket-tts = { path = "../pocket-tts", version = "0.2.8" }
+pocket-tts = { path = "../pocket-tts", version = "0.3.0" }
 candle-core.workspace = true
 anyhow.workspace = true
 clap = { workspace = true, features = ["derive"] }

@@ -1,9 +1,8 @@
-# WASM build configuration
-# Required for getrandom 0.3+ to work on wasm32-unknown-unknown
-# See: https://docs.rs/getrandom/latest/#webassembly-support
-
 [target.wasm32-unknown-unknown]
 rustflags = ['--cfg', 'getrandom_backend="wasm_js"']
+
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "target-cpu=apple-m1", "-C", "target-feature=+aes,+sha2"]
 
 [build]
 rustflags = ["-C", "target-cpu=native"]
