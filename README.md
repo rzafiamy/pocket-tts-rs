@@ -341,6 +341,10 @@ Core dependencies (see full list in `Cargo.toml`):
 
 MIT License - see [LICENSE](../LICENSE)
 
+## Acknowledgements
+
+- **[SmilyOrg](https://github.com/SmilyOrg)** for the [Docker implementation](https://github.com/babybirdprd/pocket-tts/pull/1) that enables completely offline operation.
+
 ## Related
 
 - [Pocket TTS (Python)](https://github.com/kyutai-labs/pocket-tts) - Original implementation
