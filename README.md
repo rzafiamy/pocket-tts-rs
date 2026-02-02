@@ -297,12 +297,14 @@ Build with Metal support for hardware acceleration on Apple Silicon:
 cargo build --release --features metal
 ```
 
-**Current Status:** Metal support is experimental. While the feature flag enables Metal device usage, there are known issues:
+**Current Status:** Metal support provides ~1.6x speedup over CPU on Apple Silicon:
 
-- Voice cloning may fail with device mismatch errors (fix in progress: #5)
-- Performance gains may not be as significant as expected compared to CPU
+| Backend | RTF | Speed | Notes |
+|---------|-----|-------|-------|
+| CPU | ~0.32 | 3x real-time | Default, cross-platform |
+| Metal | ~0.20 | 5x real-time | Requires `--features metal` |
 
-For best Apple Silicon performance, consider the community [MLX implementation](https://github.com/jishnuvenugopal/pocket-tts-mlx) which achieves ~12.7x real-time (vs ~6x for Candle CPU).
+For best Apple Silicon performance (~12.7x real-time), consider the community [MLX implementation](https://github.com/jishnuvenugopal/pocket-tts-mlx).
 
 ### CUDA (Linux/Windows)
 
@@ -340,10 +342,12 @@ Rust is consistently **>3.1x faster** than the optimized Python implementation.
 | Implementation | RTF | Speed vs Real-Time | Platform |
 |----------------|-----|-------------------|----------|
 | PyTorch CPU (official) | ~0.25 | 4x faster | Cross-platform |
-| **Rust/Candle CPU** | ~0.17 | **6x faster** | Cross-platform |
+| **Rust/Candle CPU** | ~0.32 | **3x faster** | Cross-platform |
+| **Rust/Candle Metal** | ~0.20 | **5x faster** | macOS (Apple Silicon) |
 | [MLX (Apple Silicon)](https://github.com/jishnuvenugopal/pocket-tts-mlx) | ~0.079 | 12.7x faster | macOS only |
 
 *RTF = Real-Time Factor (lower is better, <1.0 means faster than real-time)*
+*Candle benchmarks run on Apple M4 Max*
 
 ## Numerical Parity
 
