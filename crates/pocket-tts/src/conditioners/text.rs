@@ -118,6 +118,18 @@ impl LUTConditioner {
     }
 
     pub fn forward(&self, tokens: &Tensor) -> Result<Tensor> {
+        // Handle empty token tensors (e.g., shape [1, 0]) which cause Metal kernel issues
+        // The embedding dimension is the hidden size of the embed layer
+        let dims = tokens.dims();
+        if dims.len() >= 2 && dims[1] == 0 {
+            // Return empty embeddings with correct shape [batch, 0, embed_dim]
+            let embed_dim = self.embed.embeddings().dims()[1];
+            return Ok(Tensor::zeros(
+                (dims[0], 0, embed_dim),
+                candle_core::DType::F32,
+                tokens.device(),
+            )?);
+        }
         Ok(self.embed.forward(tokens)?)
     }
 
