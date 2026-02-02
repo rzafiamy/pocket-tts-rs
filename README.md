@@ -287,6 +287,33 @@ The Rust port mirrors the Python implementation:
 - Polyphase resampling via [rubato](https://crates.io/crates/rubato) (matches scipy)
 - Compiled to native code—no JIT, no Python overhead
 
+## GPU Acceleration
+
+### Metal (macOS)
+
+Build with Metal support for hardware acceleration on Apple Silicon:
+
+```bash
+cargo build --release --features metal
+```
+
+**Current Status:** Metal support is experimental. While the feature flag enables Metal device usage, there are known issues:
+
+- Voice cloning may fail with device mismatch errors (fix in progress: #5)
+- Performance gains may not be as significant as expected compared to CPU
+
+For best Apple Silicon performance, consider the community [MLX implementation](https://github.com/jishnuvenugopal/pocket-tts-mlx) which achieves ~12.7x real-time (vs ~6x for Candle CPU).
+
+### CUDA (Linux/Windows)
+
+Build with CUDA support:
+
+```bash
+cargo build --release --features cuda
+```
+
+**Note:** CUDA support requires a compatible NVIDIA GPU and CUDA toolkit installed.
+
 ## Benchmarking
 
 Run benchmarks to measure performance on your hardware:
@@ -307,6 +334,16 @@ Benchmarks run on User Hardware (vs Python baseline):
 - **Latency**: ~80ms to first audio chunk (optimized)
 
 Rust is consistently **>3.1x faster** than the optimized Python implementation.
+
+### Cross-Implementation Comparison
+
+| Implementation | RTF | Speed vs Real-Time | Platform |
+|----------------|-----|-------------------|----------|
+| PyTorch CPU (official) | ~0.25 | 4x faster | Cross-platform |
+| **Rust/Candle CPU** | ~0.17 | **6x faster** | Cross-platform |
+| [MLX (Apple Silicon)](https://github.com/jishnuvenugopal/pocket-tts-mlx) | ~0.079 | 12.7x faster | macOS only |
+
+*RTF = Real-Time Factor (lower is better, <1.0 means faster than real-time)*
 
 ## Numerical Parity
 
