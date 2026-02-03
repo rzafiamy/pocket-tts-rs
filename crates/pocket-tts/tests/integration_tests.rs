@@ -6,8 +6,36 @@
 use pocket_tts::audio::{read_wav, write_wav};
 use pocket_tts::voice_state::init_states;
 use pocket_tts::weights::download_if_necessary;
+use pocket_tts::TTSModel;
 
 use std::path::PathBuf;
+use std::sync::OnceLock;
+
+/// Static OnceLock to share the model across tests, preventing concurrent downloads.
+static MODEL: OnceLock<TTSModel> = OnceLock::new();
+
+/// Static OnceLock for model loaded with custom params (for pause tests).
+static MODEL_WITH_PARAMS: OnceLock<TTSModel> = OnceLock::new();
+
+/// Get or initialize the shared TTSModel instance.
+/// This ensures the model is loaded exactly once, preventing lock contention
+/// when multiple tests run in parallel.
+fn get_model() -> &'static TTSModel {
+    MODEL.get_or_init(|| TTSModel::load("b6369a24").expect("Failed to load model"))
+}
+
+/// Get or initialize the shared TTSModel instance with custom parameters.
+fn get_model_with_params() -> &'static TTSModel {
+    MODEL_WITH_PARAMS.get_or_init(|| {
+        TTSModel::load_with_params(
+            "b6369a24",
+            0.0,
+            pocket_tts::config::defaults::LSD_DECODE_STEPS,
+            pocket_tts::config::defaults::EOS_THRESHOLD,
+        )
+        .expect("Failed to load model with params")
+    })
+}
 
 fn get_ref_wav_path() -> PathBuf {
     // pocket-tts -> crates -> project_root
@@ -48,8 +76,7 @@ fn test_download_gated_weights() {
 #[test]
 // #[ignore = "requires HF_TOKEN and model download"]
 fn test_tts_model_load() {
-    use pocket_tts::TTSModel;
-    let model = TTSModel::load("b6369a24").expect("Failed to load model");
+    let model = get_model();
     assert_eq!(model.sample_rate, 24000);
     assert_eq!(model.dim, 1024);
     assert_eq!(model.ldim, 32);
@@ -58,8 +85,7 @@ fn test_tts_model_load() {
 #[test]
 // #[ignore = "requires HF_TOKEN and model download"]
 fn test_voice_cloning_from_ref_wav() {
-    use pocket_tts::TTSModel;
-    let model = TTSModel::load("b6369a24").expect("Failed to load model");
+    let model = get_model();
 
     let ref_wav_path = get_ref_wav_path();
     if !ref_wav_path.exists() {
@@ -78,8 +104,7 @@ fn test_voice_cloning_from_ref_wav() {
 #[test]
 // #[ignore = "requires HF_TOKEN and model download"]
 fn test_audio_generation_produces_valid_output() {
-    use pocket_tts::TTSModel;
-    let model = TTSModel::load("b6369a24").expect("Failed to load model");
+    let model = get_model();
 
     let ref_wav_path = get_ref_wav_path();
     if !ref_wav_path.exists() {
@@ -118,8 +143,7 @@ fn test_audio_generation_produces_valid_output() {
 #[test]
 // #[ignore = "requires HF_TOKEN and model download"]
 fn test_mimi_encode_decode_roundtrip() {
-    use pocket_tts::TTSModel;
-    let model = TTSModel::load("b6369a24").expect("Failed to load model");
+    let model = get_model();
 
     let ref_wav_path = get_ref_wav_path();
     if !ref_wav_path.exists() {
@@ -193,14 +217,7 @@ fn test_mimi_encode_decode_roundtrip() {
 #[test]
 // #[ignore = "requires HF_TOKEN and model download"]
 fn test_generate_with_pauses_adds_silence() {
-    use pocket_tts::TTSModel;
-    let model = TTSModel::load_with_params(
-        "b6369a24",
-        0.0,
-        pocket_tts::config::defaults::LSD_DECODE_STEPS,
-        pocket_tts::config::defaults::EOS_THRESHOLD,
-    )
-    .expect("Failed to load model");
+    let model = get_model_with_params();
 
     let ref_wav_path = get_ref_wav_path();
     if !ref_wav_path.exists() {
