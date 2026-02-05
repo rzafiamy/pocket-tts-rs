@@ -95,6 +95,7 @@ async fn test_api_full_flow() {
     assert_eq!(response.headers().get("content-type").unwrap(), "audio/wav");
 }
 
+#[cfg(feature = "web-ui")]
 #[tokio::test]
 async fn test_web_interface() {
     let Some(app) = create_test_app() else { return };

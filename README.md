@@ -22,6 +22,11 @@ Text-to-speech that runs entirely on CPU—no Python, no GPU required.
 ## Quick Start
 
 ```bash
+# Build Web UI assets (required for default build from source)
+cd crates/pocket-tts-cli/web
+npm install
+npm run build
+
 # Build with default features (includes Web UI assets)
 cargo build --release
 
@@ -31,6 +36,8 @@ cargo build --release --no-default-features
 # Build with Metal support (macOS only)
 cargo build --release --features metal
 ```
+
+If you prefer bun, run `bun install` and `bun run build` in `crates/pocket-tts-cli/web`.
 
 ### Generate audio
 
