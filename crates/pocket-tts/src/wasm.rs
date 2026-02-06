@@ -221,7 +221,10 @@ impl WasmTTSStream {
     /// This amortizes JS/WASM boundary overhead by combining multiple internal
     /// stream frames into a larger output chunk.
     #[wasm_bindgen]
-    pub fn next_chunk_min_samples(&mut self, min_samples: u32) -> Result<Option<Float32Array>, JsValue> {
+    pub fn next_chunk_min_samples(
+        &mut self,
+        min_samples: u32,
+    ) -> Result<Option<Float32Array>, JsValue> {
         let start_ms = Date::now();
         let iter = match self.iter.as_mut() {
             Some(iter) => iter,

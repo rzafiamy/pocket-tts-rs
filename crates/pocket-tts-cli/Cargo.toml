@@ -11,6 +11,10 @@ categories.workspace = true
 build = "build.rs"
 include = ["src/**/*", "Cargo.toml", "web/dist/**/*", "tests/**/*", "../../.cargo/config.toml"]
 
+[lib]
+name = "pocket_tts_cli"
+path = "src/lib.rs"
+
 [features]
 default = ["web-ui"]
 web-ui = ["rust-embed", "mime_guess", "percent-encoding", "pocket-tts/quantized"]
@@ -19,7 +23,7 @@ metal = ["pocket-tts/metal", "candle-core/metal"]
 mkl = ["pocket-tts/mkl"]
 
 [dependencies]
-pocket-tts = { path = "../pocket-tts", version = "0.4.0" }
+pocket-tts = { path = "../pocket-tts", version = "0.4.1" }
 candle-core.workspace = true
 anyhow.workspace = true
 clap = { workspace = true, features = ["derive"] }

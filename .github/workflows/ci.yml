@@ -46,10 +46,14 @@ jobs:
           bun run build
       - name: Run clippy (Linux/Windows)
         if: matrix.os != 'macos-latest'
-        run: cargo clippy --all-targets --features quantized -- -D warnings
+        run: |
+          cargo clippy -p pocket-tts --all-targets --features quantized -- -D warnings
+          cargo clippy -p pocket-tts-cli --all-targets --features quantized -- -D warnings
       - name: Run clippy (macOS)
         if: matrix.os == 'macos-latest'
-        run: cargo clippy --all-targets --features "quantized metal" -- -D warnings
+        run: |
+          cargo clippy -p pocket-tts --all-targets --features "quantized metal" -- -D warnings
+          cargo clippy -p pocket-tts-cli --all-targets --features "quantized metal" -- -D warnings
         env:
           RUSTFLAGS: "-C target-cpu=apple-m1 -C target-feature=+aes,+sha2"
 
@@ -75,10 +79,14 @@ jobs:
           bun run build
       - name: Run tests (Linux/Windows)
         if: matrix.os != 'macos-latest'
-        run: cargo test --release --all --features quantized
+        run: |
+          cargo test --release -p pocket-tts --features quantized
+          cargo check --release -p pocket-tts-cli --tests --features quantized
       - name: Run tests (macOS)
         if: matrix.os == 'macos-latest'
-        run: cargo test --release --all --features "quantized metal"
+        run: |
+          cargo test --release -p pocket-tts --features "quantized metal"
+          cargo check --release -p pocket-tts-cli --tests --features "quantized metal"
         env:
           RUSTFLAGS: "-C target-cpu=apple-m1 -C target-feature=+aes,+sha2"
 
