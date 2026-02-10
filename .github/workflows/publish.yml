@@ -37,23 +37,10 @@ jobs:
           files: |
             assets/*.wav
             assets/*.safetensors
+          generate_release_notes: true
           body: |
-            ## Pocket TTS v0.3.0 (Cross-Platform Stability Release)
-            
-            This release focuses on cross-platform stability and fixes critical issues for macOS (M1/M2) users.
-            
-            ### Key Changes
-            - Bundled `.cargo/config.toml` with explicit M1 target features (`+aes`, `+sha2`)
-            - Synchronized all crate versions to 0.3.0
-            - Expanded CI to Multi-OS Matrix (Linux, macOS, Windows)
-            - Fixed `ring` crate compilation failure on Apple Silicon
-            - Added `--allow-dirty` to `cargo publish` in CI
-            - Explicitly included `web/dist` in `pocket-tts-cli` package
-            - Fixed `server_tests.rs` static asset routing failure
-            - Fixed `StreamingMultiheadAttention` for voice cloning prefill
-            - Restored numerical parity with reference Python implementation
-            - Added web-based UI for live testing
-            
+            Automated release for `${{ github.ref_name }}`.
+
             > [!IMPORTANT]
             > Large model weights are downloaded automatically on first run via Hugging Face.
         env:
