@@ -410,6 +410,7 @@ MIT License - see [LICENSE](../LICENSE)
 ## Acknowledgements
 
 - **[SmilyOrg](https://github.com/SmilyOrg)** for the [Docker implementation](https://github.com/babybirdprd/pocket-tts/pull/1) that enables completely offline operation.
+- **[Kevin Chen](https://github.com/ykevinc)** for key cross-platform stability fixes in [#9](https://github.com/babybirdprd/pocket-tts/pull/9) and [#10](https://github.com/babybirdprd/pocket-tts/pull/10), merged via [#12](https://github.com/babybirdprd/pocket-tts/pull/12).
 
 ## Related
 
