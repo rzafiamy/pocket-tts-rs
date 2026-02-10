@@ -42,6 +42,8 @@ pub fn sdpa(
     context_window: Option<usize>,
 ) -> Result<Tensor> {
     let q = q.contiguous()?;
+    let k = k.contiguous()?;
+    let v = v.contiguous()?;
     let (_b, _h, q_len, _dim) = q.dims4()?;
     let kv_len = k.dims()[2];
 
@@ -51,7 +53,7 @@ pub fn sdpa(
     // Benchmark showed naive is faster for Q=1 and comparable for Q=50/64.
     const TILING_THRESHOLD: usize = 512;
 
-    let k_t = k.transpose(2, 3)?; // [B, H, D, S]
+    let k_t = k.transpose(2, 3)?.contiguous()?; // [B, H, D, S]
 
     if q_len < TILING_THRESHOLD {
         // Naive path (no tiling)
@@ -75,7 +77,7 @@ pub fn sdpa(
         };
 
         let probs = candle_nn::ops::softmax(&scores, D::Minus1)?;
-        return probs.matmul(v);
+        return probs.matmul(&v);
     }
 
     // Tiled path for large Q
@@ -114,7 +116,7 @@ pub fn sdpa(
         let probs = candle_nn::ops::softmax(&scores, D::Minus1)?;
 
         // Output chunk: [B, H, Block, D] = [B, H, Block, S] @ [B, H, S, D]
-        let out_chunk = probs.matmul(v)?;
+        let out_chunk = probs.matmul(&v)?;
 
         outputs.push(out_chunk);
     }
@@ -188,9 +190,19 @@ pub fn sdpa_chunked(
     let q = q.contiguous()?;
     let (b, h, q_len, d) = q.dims4()?;
 
+    // Ensure all KV chunks are contiguous for CPU matmul compatibility
+    let k_chunks: Vec<Tensor> = k_chunks
+        .iter()
+        .map(|t| t.contiguous())
+        .collect::<Result<_>>()?;
+    let v_chunks: Vec<Tensor> = v_chunks
+        .iter()
+        .map(|t| t.contiguous())
+        .collect::<Result<_>>()?;
+
     // Fast path for single chunk
     if k_chunks.len() == 1 {
-        let k_t = k_chunks[0].transpose(2, 3)?;
+        let k_t = k_chunks[0].transpose(2, 3)?.contiguous()?;
         let scores = (q.matmul(&k_t)? * scale)?;
         let kv_len = k_chunks[0].dims()[2];
 
@@ -222,7 +234,7 @@ pub fn sdpa_chunked(
 
     for k_chunk in k_chunks {
         total_kv_len += k_chunk.dims()[2];
-        let k_t = k_chunk.transpose(2, 3)?;
+        let k_t = k_chunk.transpose(2, 3)?.contiguous()?;
         let score_chunk = (q.matmul(&k_t)? * scale)?;
         score_chunks.push(score_chunk);
     }
@@ -259,7 +271,7 @@ pub fn sdpa_chunked(
     for v_chunk in v_chunks {
         let chunk_len = v_chunk.dims()[2];
         let probs_chunk = probs.narrow(3, offset, chunk_len)?;
-        let out_chunk = probs_chunk.matmul(v_chunk)?;
+        let out_chunk = probs_chunk.matmul(&v_chunk)?;
         output = (output + out_chunk)?;
         offset += chunk_len;
     }
@@ -330,5 +342,44 @@ mod tests {
         assert!(!can_skip_mask_for_single_query(1, 65, true, Some(64)));
         assert!(!can_skip_mask_for_single_query(2, 64, true, None));
         assert!(!can_skip_mask_for_single_query(1, 64, false, None));
+    }
+
+    #[test]
+    fn test_sdpa_handles_non_contiguous_inputs() -> Result<()> {
+        let device = Device::Cpu;
+        let scale = 1.0 / (64f64).sqrt();
+
+        // Q built from a transposed view.
+        let q_base = Tensor::zeros((1, 8, 64, 128), candle_core::DType::F32, &device)?;
+        let q = q_base.transpose(2, 3)?; // [1, 8, 128, 64]
+
+        // K is contiguous but K^T in SDPA is not, unless re-materialized.
+        let k = Tensor::zeros((1, 8, 1600, 64), candle_core::DType::F32, &device)?;
+
+        // V built from transpose + narrow view.
+        let v_base = Tensor::zeros((1, 8, 64, 1601), candle_core::DType::F32, &device)?;
+        let v = v_base.transpose(2, 3)?.narrow(2, 1, 1600)?; // [1, 8, 1600, 64]
+
+        let out = sdpa(&q, &k, &v, scale, true, None)?;
+        assert_eq!(out.dims(), &[1, 8, 128, 64]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_sdpa_chunked_handles_non_contiguous_value_chunks() -> Result<()> {
+        let device = Device::Cpu;
+        let scale = 1.0 / (32f64).sqrt();
+
+        let q = Tensor::zeros((1, 4, 64, 32), candle_core::DType::F32, &device)?;
+        let k_full = Tensor::zeros((1, 4, 320, 32), candle_core::DType::F32, &device)?;
+        let v_base = Tensor::zeros((1, 4, 32, 321), candle_core::DType::F32, &device)?;
+        let v_full = v_base.transpose(2, 3)?.narrow(2, 1, 320)?; // [1, 4, 320, 32]
+
+        let k_chunks = vec![k_full.narrow(2, 0, 160)?, k_full.narrow(2, 160, 160)?];
+        let v_chunks = vec![v_full.narrow(2, 0, 160)?, v_full.narrow(2, 160, 160)?];
+
+        let out = sdpa_chunked(&q, &k_chunks, &v_chunks, scale, true, None)?;
+        assert_eq!(out.dims(), &[1, 4, 64, 32]);
+        Ok(())
     }
 }
