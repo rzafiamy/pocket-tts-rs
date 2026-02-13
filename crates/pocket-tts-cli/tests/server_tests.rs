@@ -147,12 +147,16 @@ async fn test_web_interface() {
 async fn test_static_index_content_type_html() {
     use axum::{extract::State, http::Uri, response::IntoResponse};
 
-    let Some(state) = create_test_state() else { return };
+    let Some(state) = create_test_state() else {
+        return;
+    };
 
-    let response =
-        pocket_tts_cli::server::handlers::serve_static(Uri::from_static("/index.html"), State(state))
-            .await
-            .into_response();
+    let response = pocket_tts_cli::server::handlers::serve_static(
+        Uri::from_static("/index.html"),
+        State(state),
+    )
+    .await
+    .into_response();
 
     assert_eq!(response.status(), StatusCode::OK);
 
@@ -172,12 +176,16 @@ async fn test_static_index_content_type_html() {
 async fn test_static_spa_fallback_for_route() {
     use axum::{extract::State, http::Uri, response::IntoResponse};
 
-    let Some(state) = create_test_state() else { return };
+    let Some(state) = create_test_state() else {
+        return;
+    };
 
-    let response =
-        pocket_tts_cli::server::handlers::serve_static(Uri::from_static("/app/settings"), State(state))
-            .await
-            .into_response();
+    let response = pocket_tts_cli::server::handlers::serve_static(
+        Uri::from_static("/app/settings"),
+        State(state),
+    )
+    .await
+    .into_response();
 
     assert_eq!(response.status(), StatusCode::OK);
 
@@ -197,11 +205,14 @@ async fn test_static_spa_fallback_for_route() {
 async fn test_static_missing_file_404() {
     use axum::{extract::State, http::Uri, response::IntoResponse};
 
-    let Some(state) = create_test_state() else { return };
+    let Some(state) = create_test_state() else {
+        return;
+    };
 
-    let response = pocket_tts_cli::server::handlers::serve_static(Uri::from_static(
-        "/definitely-missing-file.zzz",
-    ), State(state))
+    let response = pocket_tts_cli::server::handlers::serve_static(
+        Uri::from_static("/definitely-missing-file.zzz"),
+        State(state),
+    )
     .await
     .into_response();
 

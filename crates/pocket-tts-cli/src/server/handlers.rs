@@ -89,7 +89,10 @@ pub async fn serve_wasm_pkg(
 
 /// Serve static files (CSS, JS, images)
 #[cfg(feature = "web-ui")]
-pub async fn serve_static(uri: axum::http::Uri, State(state): State<AppState>) -> impl IntoResponse {
+pub async fn serve_static(
+    uri: axum::http::Uri,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
     let path = uri.path().trim_start_matches('/');
 
     // If path is empty, serve index.html
