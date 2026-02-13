@@ -2,9 +2,12 @@
 
 use pocket_tts::{ModelState, TTSModel};
 use std::collections::{HashMap, VecDeque};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use tokio::sync::Mutex;
+
+use crate::commands::serve::UiMode;
 
 #[derive(Debug)]
 pub struct VoiceStateCache {
@@ -67,6 +70,10 @@ pub struct AppState {
     /// Lock to ensure sequential processing of generation requests
     /// (Matching Python's "not thread safe" / single worker behavior)
     pub lock: Arc<Mutex<()>>,
+    /// Which web UI mode should be rendered by index.html bootstrap.
+    pub ui_mode: UiMode,
+    /// Filesystem location of generated WASM JS/WASM assets.
+    pub wasm_pkg_dir: PathBuf,
 }
 
 impl AppState {
@@ -74,12 +81,16 @@ impl AppState {
         model: TTSModel,
         default_voice_state: ModelState,
         voice_cache_capacity: usize,
+        ui_mode: UiMode,
+        wasm_pkg_dir: PathBuf,
     ) -> Self {
         Self {
             model: Arc::new(model),
             default_voice_state: Arc::new(default_voice_state),
             voice_cache: Arc::new(StdMutex::new(VoiceStateCache::new(voice_cache_capacity))),
             lock: Arc::new(Mutex::new(())),
+            ui_mode,
+            wasm_pkg_dir,
         }
     }
 }

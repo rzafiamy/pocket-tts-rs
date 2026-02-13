@@ -37,9 +37,9 @@ enum Commands {
     /// Includes a web interface for interactive use.
     Serve(commands::serve::ServeArgs),
 
-    /// Serve the WASM package and browser demo
+    /// Deprecated alias for `serve --ui wasm-experimental`
     ///
-    /// Starts a static file server to test the WebAssembly TTS demo in your browser.
+    /// Starts the server with the experimental WASM-backed web UI.
     WasmDemo(commands::wasm_demo::WasmDemoArgs),
 }
 

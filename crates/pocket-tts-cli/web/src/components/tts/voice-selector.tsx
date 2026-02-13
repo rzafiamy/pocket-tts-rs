@@ -13,13 +13,19 @@ interface VoiceSelectorProps {
     customVoice: string
     onVoiceSelect: (voice: string | null) => void
     onCustomVoiceChange: (url: string) => void
+    customEnabled?: boolean
+    customLabel?: string
+    customPlaceholder?: string
 }
 
 export function VoiceSelector({
     selectedVoice,
     customVoice,
     onVoiceSelect,
-    onCustomVoiceChange
+    onCustomVoiceChange,
+    customEnabled = true,
+    customLabel = "Or use a custom URL / Path",
+    customPlaceholder = "hf://kyutai/tts-voices/voice.wav"
 }: VoiceSelectorProps) {
     return (
         <div className="space-y-4">
@@ -44,13 +50,14 @@ export function VoiceSelector({
             </div>
             <div className="space-y-2">
                 <Label htmlFor="custom-voice" className="text-xs text-muted-foreground">
-                    Or use a custom URL / Path
+                    {customLabel}
                 </Label>
                 <Input
                     id="custom-voice"
-                    placeholder="hf://kyutai/tts-voices/voice.wav"
+                    placeholder={customPlaceholder}
                     value={customVoice}
                     onChange={(e) => onCustomVoiceChange(e.target.value)}
+                    disabled={!customEnabled}
                     className="bg-muted/30 border-muted-foreground/20 focus:border-primary/50"
                 />
             </div>

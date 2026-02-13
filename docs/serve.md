@@ -27,6 +27,7 @@ This starts a server on `http://localhost:8000` with the default voice.
 - `--temperature FLOAT`: Sampling temperature (default: `0.7`)
 - `--lsd-decode-steps INT`: LSD decode steps (default: `1`)
 - `--eos-threshold FLOAT`: EOS threshold (default: `-4.0`)
+- `--ui UI`: Web UI mode (`standard` or `wasm-experimental`, default: `standard`)
 
 ## Examples
 
@@ -41,6 +42,26 @@ pocket-tts serve --host 0.0.0.0 --port 8080
 
 # Custom default voice
 pocket-tts serve --voice marius
+
+# Experimental WASM web UI mode
+pocket-tts serve --ui wasm-experimental --port 8080
+```
+
+## UI Modes
+
+`serve` uses one React UI with two backends:
+
+- `standard` (default): server-side generation via `/stream`
+- `wasm-experimental`: browser-side generation via `WasmTTSModel`
+
+If you run `--ui wasm-experimental`, ensure WASM artifacts are built first:
+
+```powershell
+.\scripts\build-wasm.ps1
+```
+
+```bash
+./scripts/build-wasm.sh
 ```
 
 ## API Endpoints
@@ -190,6 +211,24 @@ Errors return JSON with status code:
 - Model is loaded once at startup and kept in memory
 - Voice states are resolved per-request (consider caching on client side)
 - Streaming endpoint provides lower latency for first audio
+
+## Manual Verification and TTFA
+
+Use these templates:
+
+- `manual-verification/wasm-ui-verification-template.md`
+- `manual-verification/perf-ttfa-template.md`
+
+Recommended TTFA evaluation:
+
+1. Warm server startup and voice cache.
+2. Run at least 30 short-prompt measurements.
+3. Capture:
+   - TTFC (time to first chunk)
+   - TTFA (time to first audible audio)
+   - Total generation time
+4. Pass criterion:
+   - TTFA max must be `<= 600ms` for warmed local short-prompt runs.
 
 ## See Also
 

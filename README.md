@@ -65,9 +65,11 @@ cargo run --release -p pocket-tts-cli -- serve
 # Navigate to http://localhost:8000
 ```
 
-### WebAssembly Demo
+### Experimental WASM UI
 
-The browser demo features a "Zero-Setup" experience with an **embedded tokenizer and config**.
+The project has one React web app with two serving modes:
+- `standard` (default): server-backed streaming (`/stream`)
+- `wasm-experimental`: browser-side inference using `WasmTTSModel`
 
 #### 1. Build the WASM package
 From the repository root:
@@ -87,12 +89,12 @@ cargo build -p pocket-tts --release --target wasm32-unknown-unknown --features w
 wasm-bindgen --target web --out-dir crates/pocket-tts/pkg target/wasm32-unknown-unknown/release/pocket_tts.wasm
 ```
 
-#### 2. Launch the demo server
+#### 2. Launch experimental UI mode
 ```bash
-cargo run --release -p pocket-tts-cli -- wasm-demo
+cargo run --release -p pocket-tts-cli -- serve --ui wasm-experimental --port 8080
 ```
 - Navigate to `http://localhost:8080`
-- Provides built-in voice cloning and Hugging Face Hub integration.
+- `wasm-demo` still works as a deprecated alias.
 
 ## Installation
 
@@ -194,6 +196,22 @@ Options:
       --temperature <FLOAT>      Temperature [default: 0.7]
       --lsd-decode-steps <INT>   LSD steps [default: 1]
       --eos-threshold <FLOAT>    EOS threshold [default: -4.0]
+      --ui <UI>                  Web UI mode: standard|wasm-experimental [default: standard]
+```
+
+### `wasm-demo` command (deprecated alias)
+
+`wasm-demo` now forwards to `serve --ui wasm-experimental`.
+
+```
+pocket-tts wasm-demo [OPTIONS]
+
+Options:
+      --host <HOST>              Bind address [default: 127.0.0.1]
+  -p, --port <PORT>              Port number [default: 8080]
+      --root <ROOT>              Deprecated (ignored)
+  -m, --models <MODELS>          Deprecated (ignored)
+```
 
 ## Python Bindings
 
@@ -221,18 +239,6 @@ audio_samples = model.generate(
     "Hello from Rust!",
     "path/to/voice.wav"
 )
-```
-
-### `wasm-demo` command
-
-Serve the WASM package and browser demo.
-
-```
-pocket-tts wasm-demo [OPTIONS]
-
-Options:
-  -p, --port <PORT>              Port number [default: 8080]
-```
 ```
 
 ## API Endpoints
@@ -347,6 +353,23 @@ cargo bench -p pocket-tts
 ```
 
 > **Note**: Performance may differ from the Python implementation. Candle is optimized for portability rather than raw speed.
+
+## Manual Verification and TTFA Gate
+
+Use the templates in `manual-verification/` for reproducible QA:
+- `manual-verification/wasm-ui-verification-template.md`
+- `manual-verification/perf-ttfa-template.md`
+
+Recommended flow:
+1. Run standard UI:
+   - `cargo run --release -p pocket-tts-cli -- serve`
+2. Run experimental WASM UI:
+   - `cargo run --release -p pocket-tts-cli -- serve --ui wasm-experimental --port 8080`
+3. In the web UI, run the built-in **Manual TTFA Verification** panel.
+4. Record `TTFC`, `TTFA`, and total generation time for at least 30 short-prompt runs per mode.
+
+Maintainer target:
+- `TTFA <= 600ms` (time from Generate click to first audible sample) for warmed local short-prompt runs.
 
 ### Performance Results
 

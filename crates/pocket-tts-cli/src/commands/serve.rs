@@ -3,10 +3,28 @@
 //! Provides `pocket-tts serve` for HTTP API server.
 
 use anyhow::Result;
-use clap::{ArgAction, Parser};
+use clap::{ArgAction, Parser, ValueEnum};
 use owo_colors::OwoColorize;
 
 use crate::voice::PREDEFINED_VOICES;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub enum UiMode {
+    /// Existing server-backed React UI.
+    Standard,
+    /// Experimental browser-side WASM inference UI.
+    WasmExperimental,
+}
+
+impl UiMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::WasmExperimental => "wasm-experimental",
+        }
+    }
+}
 
 #[derive(Parser, Debug, Clone)]
 pub struct ServeArgs {
@@ -61,6 +79,10 @@ pub struct ServeArgs {
     /// Override MKL_NUM_THREADS before model load.
     #[arg(long)]
     pub mkl_threads: Option<usize>,
+
+    /// Web UI mode to serve.
+    #[arg(long, value_enum, default_value_t = UiMode::Standard)]
+    pub ui: UiMode,
 }
 
 pub async fn run(args: ServeArgs) -> Result<()> {
@@ -68,9 +90,11 @@ pub async fn run(args: ServeArgs) -> Result<()> {
 
     println!(
         "{} Loading model variant: {}",
-        "▶".cyan(),
+        "->".cyan(),
         args.variant.yellow()
     );
+
+    println!("{} UI mode: {}", "->".cyan(), args.ui.as_str().yellow());
 
     let server_args = args.clone();
     crate::server::start_server(server_args).await
@@ -80,7 +104,7 @@ fn print_banner() {
     println!();
     println!(
         "  {}  {} {}",
-        "🗣️".bold(),
+        "[]".bold(),
         "Pocket TTS".bold().cyan(),
         "API Server".bold()
     );
@@ -93,13 +117,13 @@ fn print_banner() {
 }
 
 /// Print endpoint information after server starts
-pub fn print_endpoints(host: &str, port: u16) {
+pub fn print_endpoints(host: &str, port: u16, ui_mode: UiMode) {
     let base = format!("http://{}:{}", host, port);
 
     println!();
     println!(
         "  {} {}",
-        "✓".green().bold(),
+        "[ok]".green().bold(),
         "Server is running!".green().bold()
     );
     println!();
@@ -142,8 +166,13 @@ pub fn print_endpoints(host: &str, port: u16) {
     );
     println!();
     println!(
+        "  {} Active web UI mode: {}",
+        "Mode:".dimmed(),
+        ui_mode.as_str().dimmed()
+    );
+    println!(
         "  {} Available voices: {}",
-        "💡".dimmed(),
+        "Voices:".dimmed(),
         PREDEFINED_VOICES.join(", ").dimmed()
     );
     println!();

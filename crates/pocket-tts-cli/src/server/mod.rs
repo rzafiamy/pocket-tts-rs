@@ -5,7 +5,7 @@
 use anyhow::Result;
 use pocket_tts::TTSModel;
 
-use crate::commands::serve::{ServeArgs, print_endpoints};
+use crate::commands::serve::{ServeArgs, UiMode, print_endpoints};
 use crate::voice::{resolve_voice, voice_cache_key};
 
 pub mod handlers;
@@ -15,6 +15,23 @@ pub mod state;
 pub async fn start_server(args: ServeArgs) -> Result<()> {
     // Initialize tracing
     let _ = tracing_subscriber::fmt::try_init();
+
+    let wasm_pkg_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .join("pocket-tts")
+        .join("pkg");
+
+    if matches!(args.ui, UiMode::WasmExperimental) {
+        let wasm_js = wasm_pkg_dir.join("pocket_tts.js");
+        let wasm_bin = wasm_pkg_dir.join("pocket_tts_bg.wasm");
+        if !wasm_js.is_file() || !wasm_bin.is_file() {
+            anyhow::bail!(
+                "WASM UI mode requires built WASM assets at {:?}. Run scripts/build-wasm.ps1 (Windows) or scripts/build-wasm.sh (Unix).",
+                wasm_pkg_dir
+            );
+        }
+    }
 
     if let Some(omp_threads) = args.omp_threads {
         // SAFETY: environment is configured at startup before serving requests.
@@ -62,7 +79,13 @@ pub async fn start_server(args: ServeArgs) -> Result<()> {
     let default_voice_state = resolve_voice(&model, Some(&args.voice))?;
     println!("  ✓ Default voice ready");
 
-    let state = state::AppState::new(model, default_voice_state, args.voice_cache_capacity);
+    let state = state::AppState::new(
+        model,
+        default_voice_state,
+        args.voice_cache_capacity,
+        args.ui,
+        wasm_pkg_dir,
+    );
     {
         let mut cache = state
             .voice_cache
@@ -100,7 +123,7 @@ pub async fn start_server(args: ServeArgs) -> Result<()> {
                     .lock()
                     .map_err(|_| anyhow::anyhow!("voice cache lock poisoned"))?;
                 cache.put(key, std::sync::Arc::new(vs));
-                println!("  û Voice prewarmed: {voice}");
+                println!("  - Voice prewarmed: {voice}");
             }
             Err(e) => {
                 println!("  !! Failed to prewarm voice '{voice}': {e}");
@@ -116,14 +139,14 @@ pub async fn start_server(args: ServeArgs) -> Result<()> {
         if let Some(frame_res) = warmup_iter.next() {
             frame_res?;
         }
-        println!("  û Warmup complete");
+        println!("  - Warmup complete");
     }
 
     let app = routes::create_router(state);
 
     let addr = format!("{}:{}", args.host, args.port);
 
-    print_endpoints(&args.host, args.port);
+    print_endpoints(&args.host, args.port, args.ui);
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 

@@ -3,6 +3,8 @@
 use crate::server::state::{AppState, VoiceStateCache};
 use crate::voice::{resolve_voice, voice_cache_key};
 #[cfg(feature = "web-ui")]
+use axum::extract::Path;
+#[cfg(feature = "web-ui")]
 use axum::response::Html;
 use axum::{
     Json,
@@ -29,9 +31,65 @@ struct StaticAssets;
 // Static file serving
 // ============================================================================
 
+#[cfg(feature = "web-ui")]
+#[derive(Serialize)]
+struct WebUiBootstrap<'a> {
+    ui_mode: &'a str,
+    api_base: &'a str,
+    wasm_base: &'a str,
+}
+
+#[cfg(feature = "web-ui")]
+fn inject_bootstrap_index(index_html: &[u8], state: &AppState) -> Vec<u8> {
+    let mut html = String::from_utf8_lossy(index_html).into_owned();
+    let bootstrap = WebUiBootstrap {
+        ui_mode: state.ui_mode.as_str(),
+        api_base: "",
+        wasm_base: "/wasm/pkg",
+    };
+    let bootstrap_json = serde_json::to_string(&bootstrap).unwrap_or_else(|_| "{}".to_string());
+    let script = format!(
+        r#"<script>window.__POCKET_TTS_BOOTSTRAP__ = {};</script>"#,
+        bootstrap_json
+    );
+
+    if let Some(idx) = html.find("</head>") {
+        html.insert_str(idx, &script);
+    } else {
+        html = format!("{script}{html}");
+    }
+
+    html.into_bytes()
+}
+
+/// Serve generated wasm-pack JS/WASM artifacts from crates/pocket-tts/pkg.
+#[cfg(feature = "web-ui")]
+pub async fn serve_wasm_pkg(
+    Path(path): Path<String>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let decoded = percent_encoding::percent_decode_str(&path).decode_utf8_lossy();
+    let rel_path: &str = decoded.as_ref();
+
+    if rel_path.is_empty() || rel_path.contains("..") || rel_path.contains('\\') {
+        return (StatusCode::BAD_REQUEST, "Invalid WASM asset path").into_response();
+    }
+
+    let full_path = state.wasm_pkg_dir.join(rel_path);
+    match tokio::fs::read(&full_path).await {
+        Ok(bytes) => {
+            let mime = mime_guess::from_path(&full_path).first_or_octet_stream();
+            let mut headers = HeaderMap::new();
+            headers.insert(header::CONTENT_TYPE, mime.as_ref().parse().unwrap());
+            (headers, bytes).into_response()
+        }
+        Err(_) => (StatusCode::NOT_FOUND, "WASM asset not found").into_response(),
+    }
+}
+
 /// Serve static files (CSS, JS, images)
 #[cfg(feature = "web-ui")]
-pub async fn serve_static(uri: axum::http::Uri) -> impl IntoResponse {
+pub async fn serve_static(uri: axum::http::Uri, State(state): State<AppState>) -> impl IntoResponse {
     let path = uri.path().trim_start_matches('/');
 
     // If path is empty, serve index.html
@@ -45,7 +103,12 @@ pub async fn serve_static(uri: axum::http::Uri) -> impl IntoResponse {
             let mime = mime_guess::from_path(path).first_or_octet_stream();
             let mut headers = HeaderMap::new();
             headers.insert(header::CONTENT_TYPE, mime.as_ref().parse().unwrap());
-            (headers, content.data.to_vec()).into_response()
+            let bytes = if path == "index.html" {
+                inject_bootstrap_index(&content.data, &state)
+            } else {
+                content.data.to_vec()
+            };
+            (headers, bytes).into_response()
         }
         None => {
             // If the request doesn't match a static file, return index.html (for SPA routing)
@@ -53,7 +116,8 @@ pub async fn serve_static(uri: axum::http::Uri) -> impl IntoResponse {
             if !path.contains('.')
                 && let Some(content) = StaticAssets::get("index.html")
             {
-                return Html(content.data.to_vec()).into_response();
+                let html = inject_bootstrap_index(&content.data, &state);
+                return Html(html).into_response();
             }
             (StatusCode::NOT_FOUND, "File not found").into_response()
         }

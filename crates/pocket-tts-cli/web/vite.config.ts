@@ -17,6 +17,7 @@ export default defineConfig({
       '/stream': 'http://localhost:3000',
       '/generate': 'http://localhost:3000',
       '/health': 'http://localhost:3000',
+      '/wasm': 'http://localhost:3000',
     }
   }
 })

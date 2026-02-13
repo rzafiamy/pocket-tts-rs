@@ -3,13 +3,14 @@ use axum::{
     http::{Request, StatusCode},
 };
 use pocket_tts::TTSModel;
+use pocket_tts_cli::commands::serve::UiMode;
 use pocket_tts_cli::server::{routes, state::AppState};
 use pocket_tts_cli::voice::resolve_voice;
 use serde_json::json;
+use std::path::Path;
 use tower::ServiceExt; // for oneshot
 
-/// Create test app state (loads model and default voice)
-fn create_test_app() -> Option<axum::Router> {
+fn create_test_state() -> Option<AppState> {
     println!("Loading model for API test...");
     let model = match TTSModel::load("b6369a24") {
         Ok(m) => m,
@@ -19,7 +20,6 @@ fn create_test_app() -> Option<axum::Router> {
         }
     };
 
-    // Load default voice
     let default_voice = match resolve_voice(&model, Some("alba")) {
         Ok(v) => v,
         Err(e) => {
@@ -28,7 +28,21 @@ fn create_test_app() -> Option<axum::Router> {
         }
     };
 
-    let state = AppState::new(model, default_voice, 64);
+    let wasm_pkg_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../pocket-tts/pkg")
+        .to_path_buf();
+    Some(AppState::new(
+        model,
+        default_voice,
+        64,
+        UiMode::Standard,
+        wasm_pkg_dir,
+    ))
+}
+
+/// Create test app state (loads model and default voice)
+fn create_test_app() -> Option<axum::Router> {
+    let state = create_test_state()?;
     Some(routes::create_router(state))
 }
 
@@ -131,11 +145,14 @@ async fn test_web_interface() {
 #[cfg(feature = "web-ui")]
 #[tokio::test]
 async fn test_static_index_content_type_html() {
-    use axum::{http::Uri, response::IntoResponse};
+    use axum::{extract::State, http::Uri, response::IntoResponse};
 
-    let response = pocket_tts_cli::server::handlers::serve_static(Uri::from_static("/index.html"))
-        .await
-        .into_response();
+    let Some(state) = create_test_state() else { return };
+
+    let response =
+        pocket_tts_cli::server::handlers::serve_static(Uri::from_static("/index.html"), State(state))
+            .await
+            .into_response();
 
     assert_eq!(response.status(), StatusCode::OK);
 
@@ -153,10 +170,12 @@ async fn test_static_index_content_type_html() {
 #[cfg(feature = "web-ui")]
 #[tokio::test]
 async fn test_static_spa_fallback_for_route() {
-    use axum::{http::Uri, response::IntoResponse};
+    use axum::{extract::State, http::Uri, response::IntoResponse};
+
+    let Some(state) = create_test_state() else { return };
 
     let response =
-        pocket_tts_cli::server::handlers::serve_static(Uri::from_static("/app/settings"))
+        pocket_tts_cli::server::handlers::serve_static(Uri::from_static("/app/settings"), State(state))
             .await
             .into_response();
 
@@ -176,11 +195,13 @@ async fn test_static_spa_fallback_for_route() {
 #[cfg(feature = "web-ui")]
 #[tokio::test]
 async fn test_static_missing_file_404() {
-    use axum::{http::Uri, response::IntoResponse};
+    use axum::{extract::State, http::Uri, response::IntoResponse};
+
+    let Some(state) = create_test_state() else { return };
 
     let response = pocket_tts_cli::server::handlers::serve_static(Uri::from_static(
         "/definitely-missing-file.zzz",
-    ))
+    ), State(state))
     .await
     .into_response();
 

@@ -27,6 +27,9 @@ pub fn create_router(state: AppState) -> Router {
         // OpenAI compatibility
         .route("/v1/audio/speech", post(handlers::openai_speech));
 
+    #[cfg(feature = "web-ui")]
+    let router = router.route("/wasm/pkg/*path", get(handlers::serve_wasm_pkg));
+
     // Static files and SPA fallback (conditionally included)
     #[cfg(feature = "web-ui")]
     let router = router.fallback(handlers::serve_static);
