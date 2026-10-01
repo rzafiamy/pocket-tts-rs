@@ -11,15 +11,15 @@ use crate::voice::PREDEFINED_VOICES;
 #[derive(Parser, Debug, Clone)]
 pub struct ServeArgs {
     /// Host address to bind (default: 127.0.0.1)
-    #[arg(long, default_value = "127.0.0.1")]
+    #[arg(long, env = "POCKET_TTS_HOST", default_value = "127.0.0.1")]
     pub host: String,
 
     /// Port number to listen on (default: 8000)
-    #[arg(short, long, default_value_t = 8000)]
+    #[arg(short, long, env = "POCKET_TTS_PORT", default_value_t = 8000)]
     pub port: u16,
 
     /// Default voice for API requests (can be overridden per-request)
-    #[arg(long)]
+    #[arg(long, env = "POCKET_TTS_VOICE")]
     pub voice: Option<String>,
 
     #[command(flatten)]
@@ -29,8 +29,9 @@ pub struct ServeArgs {
     #[arg(long, default_value_t = 64)]
     pub voice_cache_capacity: usize,
 
-    /// Comma-separated voices to prewarm at startup (e.g. "alba,marius").
-    #[arg(long, default_value = "alba")]
+    /// Comma-separated extra voices to prewarm at startup (e.g. "alba,marius");
+    /// the default voice is always loaded.
+    #[arg(long, default_value = "")]
     pub prewarm_voices: String,
 
     /// Run a tiny startup warmup generation to reduce first-request latency.

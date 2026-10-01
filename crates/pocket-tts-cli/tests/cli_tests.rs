@@ -4,10 +4,11 @@ use std::path::Path;
 #[test]
 fn test_cli_help() {
     #[allow(deprecated)]
-    let mut cmd = Command::cargo_bin("pocket-tts-cli").unwrap();
+    let mut cmd = Command::cargo_bin("pocket-tts").unwrap();
     cmd.arg("--help").assert().success();
 }
 
+/// covers: REQ-CLI-001
 #[test]
 fn test_cli_generate_basic() {
     let output_file = "test_cli_gen.wav";
@@ -17,7 +18,7 @@ fn test_cli_generate_basic() {
     }
 
     #[allow(deprecated)]
-    let mut cmd = Command::cargo_bin("pocket-tts-cli").unwrap();
+    let mut cmd = Command::cargo_bin("pocket-tts").unwrap();
     cmd.arg("generate")
         .arg("--text")
         .arg("Hello world from CLI test")
@@ -45,7 +46,7 @@ fn test_cli_generate_with_voice() {
     }
 
     #[allow(deprecated)]
-    let mut cmd = Command::cargo_bin("pocket-tts-cli").unwrap();
+    let mut cmd = Command::cargo_bin("pocket-tts").unwrap();
     // Assuming ref.wav exists in project root (d:\pocket-tts-candle)
     // We need to resolve it relative to where cargo run executes.
     // Usually project root.

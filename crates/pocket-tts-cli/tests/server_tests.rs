@@ -35,6 +35,7 @@ fn create_test_app() -> Option<axum::Router> {
     Some(routes::create_router(state))
 }
 
+/// covers: REQ-SRV-001
 #[tokio::test]
 async fn test_api_full_flow() {
     let Some(app) = create_test_app() else { return };

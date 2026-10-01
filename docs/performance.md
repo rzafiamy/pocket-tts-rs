@@ -11,9 +11,9 @@ and `--example profile` (per-component time per 80 ms frame).
 |---|---|---|---|
 | fork as found (candle 0.9, f32) | 21 | 18 | 2.0x |
 | Python reference (torch 2.14 CPU, 1 thread) | | | 4.4x |
-| this port, safetensors f32 | 20 | 11 | 2.5x |
-| this port, GGUF q8_0 | 3.4 | 7.2 | **~7x** |
-| this port, GGUF q4k | 2.1 | 7.2 | ~7x |
+| this port, f32 (safetensors or GGUF) | 20 | 7.2 | 2.8x |
+| this port, GGUF q8_0 | 3.4 | 7.2 | **6.7–7.5x** (first audio 34–47 ms) |
+| this port, GGUF q4k | 2.4 | 7.0 | **7–9x** (first audio 27–40 ms) |
 
 The gains, in order of size:
 

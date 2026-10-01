@@ -1,43 +1,47 @@
-# Contributing to Pocket TTS Candle
+# Contributing
 
-We welcome contributions! This project is now primarily a Rust implementation using the Candle framework.
+## Setup
 
-## Prerequisites
-
-- [Rust](https://rustup.rs/) (latest stable)
-- (Optional) [uv](https://github.com/astral-sh/uv) for interacting with the Python reference code.
-
-## Development Setup
-
-The project uses a standard Cargo workspace:
-
-```powershell
-# Build the project
-cargo build --release
-
-# Run all tests
-$env:HF_TOKEN="your_token_here"; cargo test --release --all-targets
+```bash
+./setup.sh            # prerequisites, dependencies, cargo check (--cuda for GPU)
+./build.sh            # release binary in build/
 ```
 
-## Repository Structure
+## Repository
 
-- `crates/pocket-tts`: Core library.
-- `crates/pocket-tts-cli`: CLI and Web Server.
-- `crates/pocket-tts-bindings`: Python bindings.
-- `assets/`: Reference assets for testing.
-- `python-reference/`: Original Python implementation.
+- `crates/pocket-tts`: library (models, kernels, GGUF, text, voices).
+- `crates/pocket-tts-cli`: `pocket-tts` binary (generate, serve, convert, info).
+- `crates/pocket-tts/config/`: upstream configs, compiled into the binary.
+- `scripts/parity/`: comparison against the Python reference.
+- `scripts/eval/`: intelligibility (ASR word error rate).
+- `spec/`: requirements, traceability matrix, manual tests.
+- `docs/`: user docs, porting status, performance.
 
-## Style Guidelines
+## Before a pull request
 
-- Run `cargo fmt` before submitting.
-- Follow standard Rust naming conventions.
-- Keep the streaming architecture in mind for any model changes.
-- Performance is a priority; use benchmarking (`cargo bench`) to justify optimizations.
+```bash
+cargo fmt --all
+cargo clippy --release --workspace --all-targets -- -D warnings
+cargo test --release --workspace
+tests/e2e.sh
+```
 
-## Numerical Parity
+- A change to the model or text handling must keep the parity matrix
+  (`scripts/parity/matrix.sh`) at the values of `docs/porting-status.md`.
+- A speed optimization comes with a test against a reference
+  implementation (see `crates/pocket-tts/src/modules/conv.rs` tests) and a
+  measurement (`cargo run --release --example profile`).
+- New requirements get an ID in `spec/specification.md`, a row in
+  `spec/matrix.md` and a `/// covers: REQ-…` comment on their test.
+- Note user-visible changes in `CHANGELOG.md`.
 
-Any core model changes MUST pass the parity tests in `crates/pocket-tts/tests/parity_tests.rs` to ensure they match the Python reference behavioral baseline.
+## Following upstream
 
-## Coding Agents
+Diff kyutai-labs/pocket-tts against the commit named in
+`docs/porting-status.md`, port behavior changes, copy new configs into
+`crates/pocket-tts/config/` and add them to `src/builtin_configs.rs`, then
+rerun the parity matrix.
 
-If you are using an AI coding agent, please refer to [AGENTS.md](./AGENTS.md) for detailed implementation context and preferred patterns.
+## Coding agents
+
+See [AGENTS.md](AGENTS.md).

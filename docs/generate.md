@@ -1,154 +1,56 @@
-# Generate Command Documentation
+# `pocket-tts generate`
 
-The `generate` command synthesizes speech from text and saves it to a WAV file.
-
-## Basic Usage
+Synthesizes text to a WAV file (or raw PCM on stdout with `--stream`).
 
 ```bash
-# Build and run
-cargo run --release -p pocket-tts-cli -- generate
-
-# Or if installed
-pocket-tts generate
+pocket-tts generate --variant french -t "Bonjour le monde." -o out.wav
+pocket-tts generate -m french-q8_0.gguf -t "Bonjour." -o out.wav
+pocket-tts generate --variant english --stream -t "Hello." | ffplay -f s16le -ar 24000 -ac 1 -
 ```
 
-This generates `./output.wav` with the default text and voice.
+Without `--text`, a greeting in the model's language is spoken.
 
-## Command Options
+## Options
 
-### Core Options
+| Option | Meaning | Default |
+|---|---|---|
+| `-t, --text` | Text; `[pause:500ms]` / `[pause:1s]` insert silence | greeting |
+| `-v, --voice` | Voice (see below) | language default |
+| `-o, --output` | WAV path | `output.wav` |
+| `--variant` | Built-in model (`english`, `french`, `french_24l`, `english_drifting_26-09`, …) or config YAML | `english` |
+| `-m, --model` | GGUF file (overrides `--variant`) | — |
+| `--device` | `cpu`, `cuda`, `cuda:N`, `metal` | `cpu` |
+| `--threads` | CPU threads | `min(4, cores)` |
+| `--temperature` | Sampling temperature | model's (0.3) |
+| `--lsd-decode-steps` | Sampler steps (more is slower; 1 is what Kyutai ships) | `1` |
+| `--eos-threshold` | End-of-speech threshold (lower = longer) | `-4.0` |
+| `--noise-clamp` | Clamp sampling noise to ±x | off |
+| `--frames-after-eos` | Frames kept after end of speech | model or length-based guess |
+| `--stream` | Raw 16-bit PCM to stdout | off |
+| `-q, --quiet` | Errors only | off |
 
-- `--text TEXT`, `-t`: Text to synthesize (default: greeting)
-- `--voice VOICE`, `-v`: Voice specification (see below)
-- `--output PATH`, `-o`: Output WAV file path (default: `output.wav`)
+Every option also has an environment variable for the model selection
+(`POCKET_TTS_MODEL`, `POCKET_TTS_VARIANT`, `POCKET_TTS_DEVICE`,
+`POCKET_TTS_THREADS`).
 
-### Generation Parameters
+## Voices
 
-- `--variant VARIANT`: Model variant identifier (default: `b6369a24`)
-- `--temperature FLOAT`: Sampling temperature for variation (default: `0.7`)
-- `--lsd-decode-steps INT`: LSD decode steps, more = better quality (default: `1`)
-- `--eos-threshold FLOAT`: End-of-speech threshold (default: `-4.0`)
-- `--noise-clamp FLOAT`: Optional noise clamp value
-- `--frames-after-eos INT`: Frames to generate after EOS (auto-calculated if not set)
+- **Predefined name**: 27 voices per language (`alba`, `estelle`, `jean`,
+  `marius`, `lola`, …; see `pocket_tts::voices::PREDEFINED_VOICES`). Each
+  language has a native default: `estelle` (French), `juergen` (German),
+  `giovanni` (Italian), `lola` (Spanish), `rafael` (Portuguese), `daan`
+  (Dutch), `alba` (English). Voices embedded in a GGUF are used without
+  download.
+- **WAV file**: clones the voice (needs the gated weights). The prompt is
+  resampled to 24 kHz, trimmed to end on a short pause, and encoded.
+- **`.safetensors`**: an exported voice state (upstream `export-voice`
+  format) or a latent prompt (`audio_prompt`).
+- **`hf://owner/repo/file[@rev]`**: downloaded, then handled as above.
 
-### Output Options
+## Text
 
-- `--stream`: Stream raw PCM audio to stdout (for piping)
-- `--quiet`, `-q`: Suppress all output except errors
-
-## Voice Specification
-
-The `--voice` argument supports multiple formats:
-
-### Predefined Voices
-
-```bash
-pocket-tts generate --voice alba
-pocket-tts generate --voice marius
-```
-
-Available: `alba`, `marius`, `javert`, `jean`, `fantine`, `cosette`, `eponine`, `azelma`
-
-### Local WAV File
-
-```bash
-pocket-tts generate --voice ./my_voice.wav
-```
-
-### Pre-computed Embeddings
-
-```bash
-pocket-tts generate --voice ./embeddings.safetensors
-```
-
-### HuggingFace URL
-
-```bash
-pocket-tts generate --voice "hf://kyutai/tts-voices/alba-mackenna/casual.wav"
-```
-
-## Examples
-
-### Basic Generation
-
-```bash
-# Default settings
-pocket-tts generate
-
-# Custom text
-pocket-tts generate --text "Hello, this is a custom message."
-
-# Custom output path
-pocket-tts generate --output ./my_audio.wav
-```
-
-### Voice Selection
-
-```bash
-# Predefined voice
-pocket-tts generate --voice marius --text "Good morning!"
-
-# Voice cloning from WAV
-pocket-tts generate --voice ./reference.wav --text "Clone my voice"
-
-# HuggingFace voice
-pocket-tts generate --voice "hf://kyutai/tts-voices/alba-mackenna/casual.wav"
-```
-
-### Quality Tuning
-
-```bash
-# Higher quality (more steps, lower temperature)
-pocket-tts generate --lsd-decode-steps 5 --temperature 0.5
-
-# More expressive (higher temperature)
-pocket-tts generate --temperature 1.0
-
-# Longer audio (more negative EOS threshold)
-pocket-tts generate --eos-threshold -5.0
-```
-
-### Streaming to Audio Player
-
-```bash
-# Stream to ffplay (Linux/macOS)
-pocket-tts generate --stream --text "Streaming audio" | \
-  ffplay -f s16le -ar 24000 -ac 1 -nodisp -autoexit -
-
-# Stream to SoX play
-pocket-tts generate --stream | play -t raw -r 24k -e signed -b 16 -c 1 -
-```
-
-## Output Format
-
-Generated audio has the following format:
-
-| Property | Value |
-|----------|-------|
-| Sample Rate | 24,000 Hz |
-| Channels | Mono (1) |
-| Bit Depth | 16-bit PCM |
-| Format | Standard WAV |
-
-When using `--stream`, raw PCM samples are written to stdout:
-- Little-endian 16-bit signed integers
-- 24 kHz sample rate
-- Mono channel
-
-## Performance Tips
-
-1. **Release build**: Always use `--release` for production
-   ```bash
-   cargo run --release -p pocket-tts-cli -- generate
-   ```
-
-2. **Reuse voice state**: For multiple generations with the same voice, use the HTTP server (`serve` command) to keep the model in memory
-
-3. **LSD steps**: Start with 1 for speed, increase to 3-5 for quality
-
-4. **Temperature**: Use 0.0 for deterministic output, 0.7 for natural variation
-
-## See Also
-
-- [Serve Command](serve.md) - HTTP API server
-- [Rust API](rust-api.md) - Library integration
+Text is prepared like upstream: characters absent from the training data
+are replaced (French quotes, curly apostrophes…), the first letter is
+capitalized, terminal punctuation is added, and long text is split into
+chunks of at most 50 tokens on sentence boundaries. Each chunk is generated
+from the voice state; numbers and abbreviations are read by the model as is.

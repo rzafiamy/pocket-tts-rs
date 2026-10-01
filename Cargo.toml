@@ -7,12 +7,12 @@ members = [
 ]
 
 [workspace.package]
-version = "0.6.2"
+version = "0.7.0"
 edition = "2024"
 authors = ["Pocket TTS Contributors"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/babybirdprd/pocket-tts"
-homepage = "https://github.com/babybirdprd/pocket-tts"
+repository = "https://github.com/rzafiamy/pocket-tts-rs"
+homepage = "https://github.com/rzafiamy/pocket-tts-rs"
 keywords = ["tts", "candle", "speech-synthesis", "audio"]
 categories = ["multimedia::audio", "science"]
 

@@ -1,90 +1,49 @@
 # AGENTS.md
 
-This file provides guidance to AI agents when working with code in this repository.
+Guidance for AI agents working in this repository.
 
-## Project Overview
+## Project
 
-pocket-tts-candle is a Rust/Candle port of the pocket-tts CPU-based text-to-speech (TTS) model. It aims for high performance and low latency on CPU.
+Rust/Candle port of Kyutai's Pocket TTS, tracking upstream
+kyutai-labs/pocket-tts (commit in `docs/porting-status.md`). One binary
+(`pocket-tts`), models from built-in configs or single-file GGUF.
 
-**Key Architecture Components:**
-- **FlowLM**: Transformer-based flow language model that generates latent representations from text using Lagrangian Self Distillation (LSD).
-- **Mimi (SEANet)**: Neural audio codec that compresses/decompresses audio to/from latent representations (v0.1.0).
-- **Conditioners**: Text processing via SentencePiece tokenizer.
-- **Streaming Architecture**: The entire pipeline supports streaming generation via stateful modules.
-- **Web API**: Axum-based server for HTTP API access with a built-in web interface.
+Pipeline: text → `text_chunking.rs` (upstream rules, ≤ 50-token chunks) →
+FlowLM backbone (`models/flow_lm.rs`, `models/transformer.rs`) → sampler
+head (`modules/mlp.rs`: lsd / flow_matching / drifting) → 32-dim latent per
+80 ms frame → Mimi decoder (`models/mimi.rs`, `models/seanet.rs`) → 24 kHz.
+Voices are FlowLM attention states (`voice_state.rs`, `voices.rs`).
 
-## Repository Structure
+## Where things are
 
-The repository is organized as a Rust workspace at the root level:
+- `crates/pocket-tts/src/tts_model.rs`: loading (safetensors / GGUF), voice
+  prompts, generation loop.
+- `src/gguf.rs`: GGUF format; `src/modules/linear.rs`: dense / QMatMul linears.
+- `src/modules/conv.rs`, `sdpa.rs`, `activations.rs`: performance-critical
+  kernels, each tested against a reference.
+- `crates/pocket-tts-cli/src/`: CLI (`commands/`), shared model options
+  (`loader.rs`), HTTP server (`server/`).
 
-- `crates/pocket-tts`: Core library containing model implementations.
-- `crates/pocket-tts-cli`: CLI interface and Axum API / Static server.
-- `crates/pocket-tts-bindings`: Python bindings using PyO3.
-- `assets/`: Centralized reference assets (.wav, .safetensors).
-- `python-reference/`: Original Python codebase for reference and parity testing.
+## Commands
 
-## Common Commands
-
-### Setup and Development
-```powershell
-# Build the project
-cargo build --release
-
-# Run all tests (including integration and parity)
-$env:HF_TOKEN="your_token_here"; cargo test --release --all-targets
-
-# Run the CLI
-cargo run --release -p pocket-tts-cli -- --help
-
-# Serve the Web UI
-cargo run --release -p pocket-tts-cli -- serve
+```bash
+cargo build --release -p pocket-tts-cli
+cargo test --release --workspace
+cargo run --release --example profile -- models/french-q8_0.gguf   # ms per frame
+cargo run --release --example bench -- french                       # real-time factor
+scripts/parity/matrix.sh                                            # vs Python
 ```
 
-### Benchmarking
-```powershell
-# Run benchmarks
-cargo bench --release
-```
+CUDA: `--features cuda`, build into `--target-dir target-cuda`, needs
+`/usr/local/cuda/bin` in PATH and `CUDA_COMPUTE_CAP`.
 
-## Code Structure (Rust)
+## Rules
 
-### Library (`crates/pocket-tts/src/`)
-
-- `tts_model.rs`: Orchestrates the TTS pipeline.
-- `models/`: Mimi and FlowLM implementations.
-- `modules/`: Transformer, MLP, Rope, etc.
-- `audio.rs`: Audio I/O and Resampling (robust to any input rate).
-- `weights.rs`: HuggingFace weight downloading and management.
-- `config.rs`: YAML configuration parsing.
-
-### CLI & Server (`crates/pocket-tts-cli/src/`)
-
-- `main.rs`: CLI entry point using `clap`.
-- `server/`: Axum router and handlers.
-- `static/`: HTML/JS for the Web UI.
-
-## Numerical Parity
-
-We maintain strict numerical parity with the Python implementation where possible.
-- Parity tests are located in `crates/pocket-tts/tests/parity_tests.rs`.
-- Reference tensors are in `assets/*.safetensors`.
-- The Rust resampler is now robust and theoretically superior to the Python reference, so `ref.wav` (regardless of rate) should be used.
-
-## Development Workflow
-
-1. **Always use --release**: Performance is critical; never benchmark or test audio quality in debug mode.
-2. **Streaming first**: All components must support stateful streaming.
-3. **CPU Optimization**: Focus on cache-friendly operations and Candle's SIMD capabilities.
-4. **Resampling**: The code now handles non-24kHz input automatically via robustness improvements in `audio.rs`.
-
-## Model Weights
-
-Weights are downloaded from HuggingFace Hub:
-- Model weights: `hf://kyutai/pocket-tts/tts_b6369a24.safetensors`
-- Tokenizer: `hf://kyutai/pocket-tts/tokenizer.model`
-
-## Common Gotchas
-
-1. **HF_TOKEN**: Required for gated weights (`kyutai/pocket-tts`).
-2. **Config Discovery**: `find_config_path` looks in `crates/pocket-tts/config` and fallback locations.
-3. **MKL/Accelerate**: Ensure appropriate BLAS backends are enabled for maximum performance.
+- Upstream behavior is the spec. Check a change against the Python
+  reference at temperature 0 (same sample count, correlation ≥ 0.999 on
+  short prompts).
+- candle 0.11 pitfalls found here: grouped `conv_transpose1d` is very slow
+  and wrong for batch > 1; `matmul` with a stride-0 batch (`broadcast_left`)
+  returns wrong values; libm `tanh` is slow. Prefer the helpers in
+  `modules/`.
+- Batch-1 CPU decoding is not helped by many threads; measure with 1–4.

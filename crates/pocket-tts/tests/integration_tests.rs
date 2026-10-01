@@ -19,17 +19,20 @@ static MODEL_WITH_PARAMS: OnceLock<TTSModel> = OnceLock::new();
 /// Shared lock for all gated model/token operations to avoid HF cache lock races.
 static MODEL_INIT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
+/// HF_TOKEN, or a token saved by `hf auth login`.
 fn has_hf_token() -> bool {
-    std::env::var("HF_TOKEN")
-        .map(|v| !v.trim().is_empty())
-        .unwrap_or(false)
+    let env = std::env::var("HF_TOKEN").is_ok_and(|v| !v.trim().is_empty());
+    let cached = std::env::var_os("HOME")
+        .map(|h| std::path::Path::new(&h).join(".cache/huggingface/token"))
+        .is_some_and(|p| p.is_file());
+    env || cached
 }
 
 fn require_hf_token(test_name: &str) -> bool {
     if has_hf_token() {
         true
     } else {
-        eprintln!("Skipping {test_name}: HF_TOKEN is not set");
+        eprintln!("Skipping {test_name}: no Hugging Face token (HF_TOKEN or hf auth login)");
         false
     }
 }
@@ -45,7 +48,7 @@ fn get_model() -> &'static TTSModel {
     let _guard = model_init_lock()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    MODEL.get_or_init(|| TTSModel::load("b6369a24").expect("Failed to load model"))
+    MODEL.get_or_init(|| TTSModel::load("english").expect("Failed to load model"))
 }
 
 /// Get or initialize the shared TTSModel instance with custom parameters.
@@ -55,7 +58,7 @@ fn get_model_with_params() -> &'static TTSModel {
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     MODEL_WITH_PARAMS.get_or_init(|| {
         TTSModel::load_with_params(
-            "b6369a24",
+            "english",
             0.0,
             pocket_tts::config::defaults::LSD_DECODE_STEPS,
             pocket_tts::config::defaults::EOS_THRESHOLD,
@@ -119,6 +122,7 @@ fn test_tts_model_load() {
     assert_eq!(model.ldim, 32);
 }
 
+/// covers: REQ-VOI-002
 #[test]
 // #[ignore = "requires HF_TOKEN and model download"]
 fn test_voice_cloning_from_ref_wav() {
@@ -141,6 +145,7 @@ fn test_voice_cloning_from_ref_wav() {
     assert!(!voice_state.is_empty(), "Voice state should not be empty");
 }
 
+/// covers: REQ-INF-002
 #[test]
 // #[ignore = "requires HF_TOKEN and model download"]
 fn test_audio_generation_produces_valid_output() {
@@ -235,7 +240,11 @@ fn test_mimi_encode_decode_roundtrip() {
 
     println!("Encoded latent shape: {:?}", latent.dims());
 
-    // Decode
+    // Decode (the quantizer projection maps the 32-channel latent back to 512)
+    let latent = model
+        .mimi
+        .quantize(&latent)
+        .expect("Failed to project latent");
     let mut decode_state = init_states(1, 1000);
     let decoded = model
         .mimi
@@ -260,6 +269,7 @@ fn test_mimi_encode_decode_roundtrip() {
     );
 }
 
+/// covers: REQ-TXT-002
 #[test]
 // #[ignore = "requires HF_TOKEN and model download"]
 fn test_generate_with_pauses_adds_silence() {
@@ -284,47 +294,23 @@ fn test_generate_with_pauses_adds_silence() {
         .generate_with_pauses(text_with_pause, &voice_state)
         .expect("Failed to generate audio with pauses");
 
-    // Get the clean text and generate audio for it directly
-    let clean_text = pocket_tts::pause::strip_pause_markers(text_with_pause);
-    let audio_base = model
-        .generate(&clean_text, &voice_state)
-        .expect("Failed to generate audio base");
-
-    let no_pause_samples = audio_base.dims()[1];
-    let with_pause_samples = audio_with_pause.dims()[1];
-
-    // Audio with pause should be exactly 500ms longer (12000 samples at 24kHz)
-    // PLUS one extra EOS-tail (since we split into two segments, and each has a tail)
-    let expected_extra_samples = 12000;
-
-    // Each segment in generate_stream_long gets its own EOS tail.
-    // The baseline generate() call has 1 tail.
-    // Our generate_with_pauses() call has 2 segments, thus 2 tails.
-    let mimi_frame_size = 1920;
-    let frames_after_eos =
-        pocket_tts::text_chunking::prepare_text_prompt("Hello", &model.text_options())
-            .unwrap()
-            .1
-            + 2;
-    let extra_tail_samples = mimi_frame_size * frames_after_eos;
-
-    let diff = with_pause_samples.saturating_sub(no_pause_samples);
-
+    // "Hello" and "world." are generated separately, so the total length is
+    // not "Hello world." plus 500 ms; check the silence itself instead.
+    let samples: Vec<f32> = audio_with_pause.flatten_all().unwrap().to_vec1().unwrap();
+    let mut longest = 0;
+    let mut run = 0;
+    for x in &samples {
+        run = if *x == 0.0 { run + 1 } else { 0 };
+        longest = longest.max(run);
+    }
     assert!(
-        diff >= expected_extra_samples + extra_tail_samples,
-        "Audio with pause should be at least {} samples longer (including extra tail), got {}",
-        expected_extra_samples + extra_tail_samples,
-        diff
+        longest >= 12_000,
+        "expected a 500 ms (12000-sample) run of silence, longest is {longest}"
     );
-
-    // Should be very close to the expected extra + extra tail
-    // Allow for one Mimi frame of jitter (+/- 1920 samples) which can happen due to
-    // segment-level termination differences or model noise at the EOS boundary.
     assert!(
-        diff <= expected_extra_samples + extra_tail_samples + mimi_frame_size + 10,
-        "Pause duration too long: got {} samples, expected ~{}",
-        diff,
-        expected_extra_samples + extra_tail_samples
+        samples.len() > 12_000 + 2 * 1920,
+        "only {} samples",
+        samples.len()
     );
 }
 

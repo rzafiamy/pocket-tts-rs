@@ -81,6 +81,7 @@ profile_output*
 *.model
 *.pt
 !/assets/*.wav
+!/portfolio/*.wav
 !/assets/ref_voice_conditioning.safetensors
 !/assets/ref_decoder_intermediates.safetensors
 !/assets/ref_mimi_input.safetensors
@@ -92,3 +93,28 @@ QWEN.md
 .claude/
 temp-candle/.venv-parity/
 /models/
+
+# Secrets
+.env
+.env.local
+*.pem
+*.key
+*.p12
+
+# OS / editors
+Thumbs.db
+.idea/
+
+# Build outputs
+/build/
+/target-cuda/
+*.app
+*.deb
+*.AppImage
+*.dmg
+*.msi
+
+# Logs / temporary files
+*.log
+tmp/
+.cache/

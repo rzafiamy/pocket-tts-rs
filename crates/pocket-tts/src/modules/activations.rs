@@ -56,6 +56,7 @@ mod tests {
     use super::*;
     use candle_core::Device;
 
+    /// covers: REQ-OPS-001
     #[test]
     fn matches_candle_gelu() -> Result<()> {
         let x = Tensor::randn(0f32, 3.0, (4, 40_000), &Device::Cpu)?;

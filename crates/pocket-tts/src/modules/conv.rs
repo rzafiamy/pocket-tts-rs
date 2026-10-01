@@ -486,6 +486,7 @@ impl ConvTrUpsample1d {
 mod tests {
     use super::*;
 
+    /// covers: REQ-OPS-001
     #[test]
     fn depthwise_convtr_matches_grouped_kernel() -> Result<()> {
         let dev = candle_core::Device::Cpu;
@@ -513,6 +514,7 @@ mod tests {
         VarBuilder::from_tensors(map, DType::F32, &dev)
     }
 
+    /// covers: REQ-OPS-001
     #[test]
     fn im2col_conv_matches_candle() -> Result<()> {
         let dev = candle_core::Device::Cpu;
@@ -542,6 +544,7 @@ mod tests {
 
     /// Checked against a hand-written loop: candle 0.11's conv_transpose1d
     /// returns wrong values for every batch item after the first.
+    /// covers: REQ-OPS-001
     #[test]
     fn matmul_convtr_matches_reference() -> Result<()> {
         let dev = candle_core::Device::Cpu;

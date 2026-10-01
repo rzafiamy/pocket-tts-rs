@@ -76,8 +76,10 @@ pub fn resolve_voice(model: &TTSModel, voice_spec: Option<&str>) -> Result<pocke
 fn resolve_voice_spec(model: &TTSModel, spec: &str) -> Result<pocket_tts::ModelState> {
     let spec = spec.trim();
 
-    // 1. Check if it's a predefined voice name
-    if pocket_tts::voices::is_predefined(&model.variant, spec) {
+    // 1. Check if it's a predefined voice name (embedded in a GGUF, or downloaded)
+    if model.embedded_voices.contains_key(spec)
+        || pocket_tts::voices::is_predefined(&model.variant, spec)
+    {
         return resolve_predefined_voice(model, spec);
     }
 
@@ -111,6 +113,9 @@ fn resolve_voice_spec(model: &TTSModel, spec: &str) -> Result<pocket_tts::ModelS
 
 /// Resolve a predefined voice name to embeddings via HF Hub
 fn resolve_predefined_voice(model: &TTSModel, name: &str) -> Result<pocket_tts::ModelState> {
+    if let Some(state) = model.embedded_voices.get(name) {
+        return Ok(state.clone());
+    }
     let hf_path = pocket_tts::voices::predefined_voice_url(&model.variant, name);
 
     let local_path = download_if_necessary(&hf_path)

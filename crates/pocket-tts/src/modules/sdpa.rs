@@ -300,6 +300,7 @@ mod tests {
         Ok(())
     }
 
+    /// covers: REQ-OPS-001
     #[test]
     fn test_generate_mask_chunk_window() -> Result<()> {
         let device = Device::Cpu;
@@ -333,6 +334,7 @@ mod tests {
         assert!(!can_skip_mask_for_single_query(1, 64, false, None));
     }
 
+    /// covers: REQ-OPS-001
     #[test]
     fn test_sdpa_handles_non_contiguous_inputs() -> Result<()> {
         let device = Device::Cpu;

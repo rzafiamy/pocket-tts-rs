@@ -15,19 +15,19 @@ pub struct ModelArgs {
     /// Model variant: a language (`english`, `french`, `german`, `italian`,
     /// `spanish`, `portuguese`, `dutch`), a `_24l` variant, `b6369a24`, or a
     /// config YAML path. Ignored with --model.
-    #[arg(long, default_value = "english")]
+    #[arg(long, env = "POCKET_TTS_VARIANT", default_value = "english")]
     pub variant: String,
 
     /// GGUF model file written by `pocket-tts convert`
-    #[arg(short, long)]
+    #[arg(short, long, env = "POCKET_TTS_MODEL")]
     pub model: Option<PathBuf>,
 
     /// Device: cpu, cuda, cuda:N or metal
-    #[arg(long, default_value = "cpu")]
+    #[arg(long, env = "POCKET_TTS_DEVICE", default_value = "cpu")]
     pub device: String,
 
     /// CPU threads (default: min(4, available cores))
-    #[arg(long)]
+    #[arg(long, env = "POCKET_TTS_THREADS")]
     pub threads: Option<usize>,
 
     /// Sampling temperature (higher = more variation; defaults to the
@@ -94,7 +94,6 @@ impl ModelArgs {
         model.lsd_decode_steps = self.lsd_decode_steps;
         model.eos_threshold = self.eos_threshold;
         model.noise_clamp = self.noise_clamp;
-        model.flow_lm.noise_clamp = self.noise_clamp;
         Ok(model)
     }
 

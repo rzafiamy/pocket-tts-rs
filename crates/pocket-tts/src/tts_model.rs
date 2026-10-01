@@ -779,7 +779,9 @@ impl TTSModel {
         let mut fade_pending = true;
         let mut eos_step: Option<usize> = None;
         let mut step = 0;
-        let model = self.clone();
+        let mut model = self.clone();
+        // `noise_clamp` on the model is the setting; the sampler keeps a copy.
+        model.flow_lm.noise_clamp = self.noise_clamp;
 
         Box::new(std::iter::from_fn(move || {
             if step >= max_gen_len {
@@ -967,6 +969,48 @@ fn fade_in(audio: &Tensor, n: usize) -> Result<Tensor> {
 mod tests {
     use super::*;
 
+    /// covers: REQ-VOI-001
+    /// Exported Python states (`<module>/cache` `[2, B, T, H, D]` + `offset`)
+    /// become FlowLM attention states holding the first `offset` positions.
+    #[test]
+    fn import_exported_model_state() -> Result<()> {
+        use crate::voice_state::{ATTN_K_BUF_KEY, ATTN_V_BUF_KEY, read_attention_cursor};
+        let dev = Device::Cpu;
+        let (t, h, d, offset) = (10, 2, 4, 7);
+        let cache = Tensor::arange(0f32, (2 * t * h * d) as f32, &dev)?.reshape((2, 1, t, h, d))?;
+        let mut tensors = std::collections::HashMap::new();
+        tensors.insert(
+            "transformer.layers.0.self_attn/cache".to_string(),
+            cache.clone(),
+        );
+        tensors.insert(
+            "transformer.layers.0.self_attn/offset".to_string(),
+            Tensor::new(&[offset as i64], &dev)?,
+        );
+        let state = import_model_state(&tensors, &dev)?;
+        let m = &state["flow_lm.transformer.layers.0.self_attn"];
+        assert_eq!(m[ATTN_K_BUF_KEY].dims(), &[1, h, offset, d]);
+        let expected_v = cache.get(1)?.narrow(1, 0, offset)?.transpose(1, 2)?;
+        let diff = (&m[ATTN_V_BUF_KEY] - expected_v)?
+            .abs()?
+            .max_all()?
+            .to_scalar::<f32>()?;
+        assert_eq!(diff, 0.0);
+        let cursor = read_attention_cursor(m);
+        assert_eq!((cursor.pos, cursor.len), (offset, offset));
+
+        tensors.insert(
+            "transformer.layers.0.self_attn/pad".to_string(),
+            Tensor::new(&[1i64], &dev)?,
+        );
+        assert!(
+            import_model_state(&tensors, &dev).is_err(),
+            "padded states are refused"
+        );
+        Ok(())
+    }
+
+    /// covers: REQ-CFG-001
     #[test]
     fn builtin_configs_parse() {
         for name in crate::builtin_configs::names() {

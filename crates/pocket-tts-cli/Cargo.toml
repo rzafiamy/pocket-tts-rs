@@ -13,6 +13,10 @@ categories.workspace = true
 name = "pocket_tts_cli"
 path = "src/lib.rs"
 
+[[bin]]
+name = "pocket-tts"
+path = "src/main.rs"
+
 [features]
 default = []
 quantized = ["pocket-tts/quantized"]
@@ -21,10 +25,10 @@ metal = ["pocket-tts/metal", "candle-core/metal"]
 mkl = ["pocket-tts/mkl"]
 
 [dependencies]
-pocket-tts = { path = "../pocket-tts", version = "0.6.2" }
+pocket-tts = { path = "../pocket-tts", version = "0.7.0" }
 candle-core.workspace = true
 anyhow.workspace = true
-clap = { workspace = true, features = ["derive"] }
+clap = { workspace = true, features = ["derive", "env"] }
 axum = { workspace = true, features = ["multipart"] }
 base64 = "0.21"
 tokio = { workspace = true, features = ["full"] }

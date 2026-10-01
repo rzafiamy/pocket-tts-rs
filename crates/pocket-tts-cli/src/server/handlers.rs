@@ -15,7 +15,6 @@ use tokio_stream::StreamExt as _;
 type SharedVoiceState = std::sync::Arc<pocket_tts::ModelState>;
 type VoiceCache = std::sync::Arc<std::sync::Mutex<VoiceStateCache>>;
 
-// Embed static files at compile time
 #[derive(Serialize)]
 pub struct HealthResponse {
     status: String,

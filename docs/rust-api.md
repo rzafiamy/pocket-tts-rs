@@ -8,14 +8,8 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-pocket-tts = { path = "path/to/candle/crates/pocket-tts" }
-```
-
-Or once published to crates.io:
-
-```toml
-[dependencies]
-pocket-tts = "0.1"
+pocket-tts = { git = "https://github.com/rzafiamy/pocket-tts-rs" }
+# GPU: pocket-tts = { git = "...", features = ["cuda"] }
 ```
 
 ## Quick Start
@@ -26,13 +20,13 @@ use anyhow::Result;
 
 fn main() -> Result<()> {
     // Load the model
-    let model = TTSModel::load("b6369a24")?;
+    let model = TTSModel::load("french")?;
     
     // Get voice state from audio file
     let voice_state = model.get_voice_state("voice.wav")?;
     
     // Generate audio
-    let audio = model.generate("Hello, world!", &voice_state)?;
+    let audio = model.generate("Bonjour tout le monde !", &voice_state)?;
     
     // Save to file
     pocket_tts::audio::write_wav("output.wav", &audio, model.sample_rate as u32)?;
@@ -62,7 +56,7 @@ pub struct TTSModel {
 Load a model with default parameters.
 
 ```rust
-let model = TTSModel::load("b6369a24")?;
+let model = TTSModel::load("french")?;
 ```
 
 ##### `TTSModel::load_with_params(...) -> Result<Self>`
@@ -71,20 +65,35 @@ Load with custom generation parameters.
 
 ```rust
 let model = TTSModel::load_with_params(
-    "b6369a24",     // variant
-    0.7,            // temperature
+    "french",       // variant
+    0.3,            // temperature
     1,              // lsd_decode_steps
     -4.0,           // eos_threshold
 )?;
 ```
 
 **Parameters:**
-- `variant`: Model variant identifier (e.g., `"b6369a24"`)
-- `temp`: Sampling temperature (0.0 = deterministic, 0.7 = natural)
-- `lsd_decode_steps`: LSD decode steps (1 = fast, 5 = high quality)
+- `variant`: built-in config name (`"english"`, `"french"`, `"french_24l"`, …) or a YAML path
+- `temp`: Sampling temperature (0.0 = deterministic; models recommend 0.3, see `model.config.default_temperature`)
+- `lsd_decode_steps`: sampler steps (1 is what Kyutai ships)
 - `eos_threshold`: End-of-speech threshold (more negative = longer audio)
 
+##### `TTSModel::load_gguf(path, &device) -> Result<Self>`
+
+Load a single-file GGUF written by `pocket-tts convert` (weights, config,
+tokenizer, voices). Quantized linear layers run through `QMatMul`.
+
+```rust
+let device = candle_core::Device::Cpu; // or Device::new_cuda(0)?
+let model = TTSModel::load_gguf("french-q8_0.gguf", &device)?;
+let voice = model.embedded_voices.get("estelle").unwrap().clone();
+```
+
 #### Voice State Methods
+
+Predefined voices: `pocket_tts::voices::predefined_voice_url(&model.variant, "estelle")`
+gives the `hf://` location, `pocket_tts::weights::download_if_necessary`
+fetches it, `get_voice_state_from_prompt_file` loads it.
 
 ##### `get_voice_state<P: AsRef<Path>>(&self, audio_path: P) -> Result<ModelState>`
 
@@ -106,7 +115,9 @@ let voice_state = model.get_voice_state_from_tensor(&audio)?;
 
 ##### `get_voice_state_from_prompt_file<P: AsRef<Path>>(&self, path: P) -> Result<ModelState>`
 
-Load pre-computed voice embeddings from a `.safetensors` file.
+Load a `.safetensors` voice: an exported model state (upstream
+`export-voice` format, used by the predefined voices) or a latent prompt
+(`audio_prompt`).
 
 ```rust
 let voice_state = model.get_voice_state_from_prompt_file("embeddings.safetensors")?;
@@ -194,7 +205,7 @@ use pocket_tts::TTSModel;
 use candle_core::Tensor;
 
 fn batch_generate(texts: &[&str], voice_path: &str) -> anyhow::Result<Vec<Tensor>> {
-    let model = TTSModel::load("b6369a24")?;
+    let model = TTSModel::load("french")?;
     let voice_state = model.get_voice_state(voice_path)?;
     
     // Reuse voice state for multiple generations
@@ -215,7 +226,7 @@ use pocket_tts::TTSModel;
 use std::io::Write;
 
 fn stream_to_stdout(text: &str, voice_path: &str) -> anyhow::Result<()> {
-    let model = TTSModel::load("b6369a24")?;
+    let model = TTSModel::load("french")?;
     let voice_state = model.get_voice_state(voice_path)?;
     
     let mut stdout = std::io::stdout();
@@ -241,7 +252,7 @@ use pocket_tts::TTSModel;
 use std::collections::HashMap;
 
 fn multi_voice_generation() -> anyhow::Result<()> {
-    let model = TTSModel::load("b6369a24")?;
+    let model = TTSModel::load("french")?;
     
     // Pre-load multiple voice states
     let voices: HashMap<&str, _> = [
@@ -267,10 +278,10 @@ Default generation parameters are available in `pocket_tts::config::defaults`:
 ```rust
 use pocket_tts::config::defaults;
 
-println!("Default temperature: {}", defaults::TEMPERATURE);        // 0.7
+println!("Default temperature: {}", defaults::TEMPERATURE);        // 0.3
 println!("Default LSD steps: {}", defaults::LSD_DECODE_STEPS);     // 1
 println!("Default EOS threshold: {}", defaults::EOS_THRESHOLD);    // -4.0
-println!("Default variant: {}", defaults::DEFAULT_VARIANT);        // "b6369a24"
+println!("Default variant: {}", defaults::DEFAULT_VARIANT);        // "english"
 ```
 
 ## Error Handling
@@ -285,7 +296,7 @@ All fallible operations return `anyhow::Result`. Common errors:
 ```rust
 use anyhow::Context;
 
-let model = TTSModel::load("b6369a24")
+let model = TTSModel::load("french")
     .context("Failed to load TTS model")?;
 
 let voice_state = model.get_voice_state("voice.wav")

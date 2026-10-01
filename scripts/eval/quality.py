@@ -4,7 +4,7 @@ OpenAI-compatible ASR endpoint, report word error rate (WER) per system.
 
 Systems are given as NAME=COMMAND templates, run once per sentence with
 {text} and {out} substituted, e.g.
-  rs_q8="target/release/pocket-tts-cli generate -q -m models/french-q8_0.gguf -t {text} -o {out}"
+  rs_q8="target/release/pocket-tts generate -q -m models/french-q8_0.gguf -t {text} -o {out}"
 
 Usage: quality.py --lang french --asr http://localhost:6767 --asr-model parakeet-tdt-v3-cpu \
          --system NAME=CMD [--system ...] [--repeats 2]

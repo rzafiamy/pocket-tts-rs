@@ -33,7 +33,8 @@ pub fn download_if_necessary(file_path: &str) -> Result<PathBuf> {
 
         // HF_TOKEN overrides the token cached by `hf auth login`; passing
         // None unconditionally would discard the cached one.
-        let mut builder = ApiBuilder::new();
+        // from_env: honors HF_HOME (cache and token location) and HF_ENDPOINT.
+        let mut builder = ApiBuilder::from_env();
         if let Ok(token) = std::env::var("HF_TOKEN") {
             builder = builder.with_token(Some(token));
         }

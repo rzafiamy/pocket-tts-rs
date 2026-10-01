@@ -262,6 +262,7 @@ mod tests {
         }
     }
 
+    /// covers: REQ-TXT-001
     #[test]
     fn terminal_punctuation() {
         assert_eq!(ensure_terminal_punctuation("Hello"), "Hello.");
@@ -273,6 +274,7 @@ mod tests {
         assert_eq!(ensure_terminal_punctuation("(wait, ) "), "(wait.)");
     }
 
+    /// covers: REQ-TXT-001
     #[test]
     fn prepare_basic() {
         let (t, g) = prepare_text_prompt("  hello world ", &opts()).unwrap();
@@ -282,6 +284,7 @@ mod tests {
         assert!(prepare_text_prompt("   ", &opts()).is_err());
     }
 
+    /// covers: REQ-TXT-001
     #[test]
     fn prepare_padding_and_semicolons() {
         let o = TextOptions {
@@ -293,6 +296,7 @@ mod tests {
         assert_eq!(t, "        A, b.");
     }
 
+    /// covers: REQ-TXT-001
     #[test]
     fn prepare_replace_characters() {
         let mut o = opts();

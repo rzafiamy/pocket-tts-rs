@@ -42,6 +42,9 @@ enum Commands {
     /// Packs weights (linear layers quantized to --dtype), config, tokenizer
     /// and predefined voices into one file for `--model`.
     Convert(commands::convert::ConvertArgs),
+
+    /// Load a model and print its effective configuration
+    Info(commands::info::InfoArgs),
 }
 
 fn main() -> Result<()> {
@@ -49,6 +52,7 @@ fn main() -> Result<()> {
     let threads = match &args.command {
         Commands::Generate(a) => a.model.threads,
         Commands::Serve(a) => a.model.threads,
+        Commands::Info(a) => a.model.threads,
         Commands::Convert(_) => None,
     };
     // Before the async runtime starts its worker threads.
@@ -63,5 +67,6 @@ fn main() -> Result<()> {
             tokio::runtime::Runtime::new()?.block_on(commands::serve::run(cmd_args))
         }
         Commands::Convert(cmd_args) => commands::convert::run(cmd_args),
+        Commands::Info(cmd_args) => commands::info::run(cmd_args),
     }
 }

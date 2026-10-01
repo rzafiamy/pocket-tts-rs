@@ -7,17 +7,20 @@
 #   python3 -m venv .venv-parity
 #   .venv-parity/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
 #   .venv-parity/bin/pip install -e /tmp/pocket-tts-py
-#   cargo build --release -p pocket-tts-cli --no-default-features --features quantized
+#   cargo build --release -p pocket-tts-cli
 #
 # Usage: scripts/parity/matrix.sh [out_dir]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PY="${PARITY_PYTHON:-$ROOT/.venv-parity/bin/python}"
-BIN="$ROOT/target/release/pocket-tts-cli"
+BIN="$ROOT/target/release/pocket-tts"
 OUT="${1:-$(mktemp -d)}"
 HERE="$ROOT/scripts/parity"
-mkdir -p "$OUT"
+mkdir -p "$OUT" || { echo "cannot create output directory $OUT" >&2; exit 1; }
+[ -x "$PY" ] || { echo "Python reference not found at $PY (see setup above, or set PARITY_PYTHON)" >&2; exit 1; }
+[ -x "$BIN" ] || { echo "binary not found: $BIN (cargo build --release -p pocket-tts-cli)" >&2; exit 1; }
+"$PY" -c "import pocket_tts" 2>/dev/null || { echo "pocket_tts is not installed in $PY" >&2; exit 1; }
 
 run() { # name variant voice text
   local n=$1 v=$2 vo=$3 t=$4

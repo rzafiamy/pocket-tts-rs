@@ -214,6 +214,7 @@ pub fn silence_samples(duration_ms: u32, sample_rate: u32) -> usize {
 mod tests {
     use super::*;
 
+    /// covers: REQ-TXT-002
     #[test]
     fn test_parse_explicit_pause_ms() {
         let pauses = parse_explicit_pauses("Hello [pause:500ms] world");
@@ -251,6 +252,7 @@ mod tests {
         assert_eq!(pauses.len(), 0);
     }
 
+    /// covers: REQ-TXT-002
     #[test]
     fn test_strip_pause_markers() {
         let clean = strip_pause_markers("Hello [pause:500ms] world [pause:1s] done");
