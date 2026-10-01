@@ -1,14 +1,11 @@
 use candle_core::Tensor;
 
 use hound::{Error as HoundError, WavReader};
-#[cfg(not(target_arch = "wasm32"))]
 use hound::{WavSpec, WavWriter};
 
 use std::io;
-#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
-#[cfg(not(target_arch = "wasm32"))]
 pub fn read_wav<P: AsRef<Path>>(path: P) -> anyhow::Result<(Tensor, u32)> {
     let reader = WavReader::open(path)?;
     read_wav_internal(reader)
@@ -75,18 +72,7 @@ fn read_wav_internal<R: std::io::Read + std::io::Seek>(
         }
     };
 
-    let device = if cfg!(target_arch = "wasm32") {
-        &candle_core::Device::Cpu
-    } else {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            &candle_core::Device::Cpu
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            &candle_core::Device::Cpu
-        }
-    };
+    let device = &candle_core::Device::Cpu;
 
     let tensor = if channels > 1 {
         // Interleaved to [channels, samples]
@@ -121,11 +107,6 @@ pub fn pcm_i16_le_bytes(audio: &Tensor) -> anyhow::Result<Vec<u8>> {
     Ok(pcm_i16_le_bytes_from_slices(&channel_slices))
 }
 
-#[cfg(target_arch = "wasm32")]
-pub(crate) fn pcm_i16_le_bytes_mono(samples: &[f32]) -> Vec<u8> {
-    pcm_i16_le_bytes_from_slices(&[samples])
-}
-
 fn pcm_i16_le_bytes_from_slices(channels: &[&[f32]]) -> Vec<u8> {
     if channels.is_empty() {
         return Vec::new();
@@ -145,13 +126,11 @@ fn pcm_i16_le_bytes_from_slices(channels: &[&[f32]]) -> Vec<u8> {
     out
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub fn write_wav<P: AsRef<Path>>(path: P, audio: &Tensor, sample_rate: u32) -> anyhow::Result<()> {
     let mut writer = std::fs::File::create(path)?;
     write_wav_to_writer(&mut writer, audio, sample_rate)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub fn write_wav_to_writer<W: std::io::Write + std::io::Seek>(
     writer: W,
     audio: &Tensor,
@@ -355,7 +334,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(target_arch = "wasm32"))]
     fn test_resample() -> anyhow::Result<()> {
         let device = Device::Cpu;
         // rubato works best with reasonable block sizes.
@@ -384,7 +362,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(target_arch = "wasm32"))]
     fn test_wav_io() -> anyhow::Result<()> {
         let device = Device::Cpu;
         // Use small values to avoid clipping

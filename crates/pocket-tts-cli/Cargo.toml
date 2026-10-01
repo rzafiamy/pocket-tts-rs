@@ -8,17 +8,15 @@ repository.workspace = true
 description = "CLI and API server for Pocket TTS"
 keywords.workspace = true
 categories.workspace = true
-build = "build.rs"
-include = ["src/**/*", "Cargo.toml", "web/dist/**/*", "tests/**/*", "../../.cargo/config.toml"]
 
 [lib]
 name = "pocket_tts_cli"
 path = "src/lib.rs"
 
 [features]
-default = ["web-ui"]
-web-ui = ["rust-embed", "mime_guess", "percent-encoding", "pocket-tts/quantized"]
+default = []
 quantized = ["pocket-tts/quantized"]
+cuda = ["pocket-tts/cuda", "candle-core/cuda"]
 metal = ["pocket-tts/metal", "candle-core/metal"]
 mkl = ["pocket-tts/mkl"]
 
@@ -40,9 +38,6 @@ tower-http = { workspace = true, features = ["fs", "trace", "cors"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 owo-colors = "4"
-rust-embed = { version = "8", optional = true }
-mime_guess = { version = "2", optional = true }
-percent-encoding = { version = "2.3", optional = true }
 
 [dev-dependencies]
 assert_cmd = "2.0"

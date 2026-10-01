@@ -3,28 +3,10 @@
 //! Provides `pocket-tts serve` for HTTP API server.
 
 use anyhow::Result;
-use clap::{ArgAction, Parser, ValueEnum};
+use clap::{ArgAction, Parser};
 use owo_colors::OwoColorize;
 
 use crate::voice::PREDEFINED_VOICES;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-#[value(rename_all = "kebab-case")]
-pub enum UiMode {
-    /// Existing server-backed React UI.
-    Standard,
-    /// Experimental browser-side WASM inference UI.
-    WasmExperimental,
-}
-
-impl UiMode {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Standard => "standard",
-            Self::WasmExperimental => "wasm-experimental",
-        }
-    }
-}
 
 #[derive(Parser, Debug, Clone)]
 pub struct ServeArgs {
@@ -40,26 +22,8 @@ pub struct ServeArgs {
     #[arg(long)]
     pub voice: Option<String>,
 
-    /// Model variant: a language (`english`, `french`, `german`, ...), a
-    /// `_24l` variant, or `b6369a24` for the original English model
-    #[arg(long, default_value = "english")]
-    pub variant: String,
-
-    /// Sampling temperature (defaults to the model's recommended value)
-    #[arg(long)]
-    pub temperature: Option<f32>,
-
-    /// LSD decode steps
-    #[arg(long, default_value = "1")]
-    pub lsd_decode_steps: usize,
-
-    /// EOS threshold
-    #[arg(long, default_value = "-4.0")]
-    pub eos_threshold: f32,
-
-    /// Use simulated int8 quantization for inference
-    #[arg(long)]
-    pub quantized: bool,
+    #[command(flatten)]
+    pub model: crate::loader::ModelArgs,
 
     /// Maximum number of resolved voice states to keep in server LRU cache.
     #[arg(long, default_value_t = 64)]
@@ -72,30 +36,16 @@ pub struct ServeArgs {
     /// Run a tiny startup warmup generation to reduce first-request latency.
     #[arg(long, default_value_t = true, action = ArgAction::Set)]
     pub warmup: bool,
-
-    /// Override OMP_NUM_THREADS before model load.
-    #[arg(long)]
-    pub omp_threads: Option<usize>,
-
-    /// Override MKL_NUM_THREADS before model load.
-    #[arg(long)]
-    pub mkl_threads: Option<usize>,
-
-    /// Web UI mode to serve.
-    #[arg(long, value_enum, default_value_t = UiMode::Standard)]
-    pub ui: UiMode,
 }
 
 pub async fn run(args: ServeArgs) -> Result<()> {
     print_banner();
 
     println!(
-        "{} Loading model variant: {}",
+        "{} Loading model: {}",
         "->".cyan(),
-        args.variant.yellow()
+        args.model.describe().yellow()
     );
-
-    println!("{} UI mode: {}", "->".cyan(), args.ui.as_str().yellow());
 
     let server_args = args.clone();
     crate::server::start_server(server_args).await
@@ -118,7 +68,7 @@ fn print_banner() {
 }
 
 /// Print endpoint information after server starts
-pub fn print_endpoints(host: &str, port: u16, ui_mode: UiMode) {
+pub fn print_endpoints(host: &str, port: u16) {
     let base = format!("http://{}:{}", host, port);
 
     println!();
@@ -129,12 +79,6 @@ pub fn print_endpoints(host: &str, port: u16, ui_mode: UiMode) {
     );
     println!();
     println!("  {}", "Endpoints:".bold());
-    println!(
-        "    {} {}  {}",
-        "GET".cyan(),
-        format!("{}/", base).white(),
-        "Web interface".dimmed()
-    );
     println!(
         "    {} {}  {}",
         "GET".cyan(),
@@ -166,11 +110,6 @@ pub fn print_endpoints(host: &str, port: u16, ui_mode: UiMode) {
         "OpenAI-compatible".dimmed()
     );
     println!();
-    println!(
-        "  {} Active web UI mode: {}",
-        "Mode:".dimmed(),
-        ui_mode.as_str().dimmed()
-    );
     println!(
         "  {} Available voices: {}",
         "Voices:".dimmed(),

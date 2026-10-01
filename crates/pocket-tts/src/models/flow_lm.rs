@@ -1,8 +1,9 @@
 use crate::ModelState;
 use crate::models::transformer::StreamingTransformer;
+use crate::modules::linear::{Linear, linear, linear_no_bias};
 use crate::modules::mlp::{LayerNorm, ModulationParams, SimpleMLPAdaLN};
 use candle_core::{Result, Tensor};
-use candle_nn::{Linear, Module, VarBuilder};
+use candle_nn::{Module, VarBuilder};
 
 /// Integrates the sampler head from noise `x_0`, one modulation set per step.
 ///
@@ -78,9 +79,9 @@ impl FlowLMModel {
         dim: usize,
         vb: VarBuilder,
     ) -> Result<Self> {
-        let input_linear = candle_nn::linear_no_bias(ldim, dim, vb.pp("input_linear"))?;
+        let input_linear = linear_no_bias(ldim, dim, vb.pp("input_linear"))?;
         let out_norm = LayerNorm::new(dim, 1e-5, true, vb.pp("out_norm"))?;
-        let out_eos = candle_nn::linear(dim, 1, vb.pp("out_eos"))?;
+        let out_eos = linear(dim, 1, vb.pp("out_eos"))?;
         let bos_emb = vb.get(ldim, "bos_emb")?;
         let emb_mean = vb.get(ldim, "emb_mean")?;
         let emb_std = vb.get(ldim, "emb_std")?;

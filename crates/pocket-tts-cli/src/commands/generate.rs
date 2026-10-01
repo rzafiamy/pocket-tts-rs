@@ -9,20 +9,20 @@ use owo_colors::OwoColorize;
 use pocket_tts::TTSModel;
 use std::path::PathBuf;
 
+use crate::loader::ModelArgs;
 use crate::voice::{PREDEFINED_VOICES, resolve_voice};
-
-/// Default text shown when user runs without --text
 
 #[derive(Parser, Debug)]
 pub struct GenerateArgs {
-    /// Text to synthesize (defaults to a greeting in the model's language)
+    /// Text to synthesize (defaults to a greeting in the model's language).
+    /// `[pause:500ms]` or `[pause:1s]` inserts silence.
     #[arg(short, long)]
     pub text: Option<String>,
 
     /// Voice for synthesis. Can be:
-    /// - Predefined name: alba, marius, javert, jean, fantine, cosette, eponine, azelma
+    /// - Predefined name (alba, estelle, ...; defaults to the language's voice)
     /// - Path to .wav file for voice cloning
-    /// - Path to .safetensors embeddings file
+    /// - Path to .safetensors voice (exported state or latent prompt)
     /// - HuggingFace URL: hf://owner/repo/file.wav
     #[arg(short, long)]
     pub voice: Option<String>,
@@ -31,27 +31,8 @@ pub struct GenerateArgs {
     #[arg(short, long, default_value = "output.wav")]
     pub output: PathBuf,
 
-    /// Model variant: a language (`english`, `french`, `german`, `italian`,
-    /// `spanish`, `portuguese`, `dutch`), a `_24l` variant, or `b6369a24`
-    #[arg(long, default_value = "english")]
-    pub variant: String,
-
-    /// Sampling temperature (higher = more variation; defaults to the model's
-    /// recommended value)
-    #[arg(long)]
-    pub temperature: Option<f32>,
-
-    /// LSD decode steps (more steps = better quality, slower)
-    #[arg(long, default_value = "1")]
-    pub lsd_decode_steps: usize,
-
-    /// EOS threshold (more negative = longer audio)
-    #[arg(long, default_value = "-4.0")]
-    pub eos_threshold: f32,
-
-    /// Noise clamp value (optional)
-    #[arg(long)]
-    pub noise_clamp: Option<f32>,
+    #[command(flatten)]
+    pub model: ModelArgs,
 
     /// Frames to generate after EOS detection (optional, auto-estimated if not set)
     #[arg(long)]
@@ -60,14 +41,6 @@ pub struct GenerateArgs {
     /// Stream raw PCM audio to stdout (for piping to audio players)
     #[arg(long)]
     pub stream: bool,
-
-    /// Use simulated int8 quantization for inference
-    #[arg(long)]
-    pub quantized: bool,
-
-    /// Use Metal acceleration (macOS only)
-    #[arg(long)]
-    pub use_metal: bool,
 
     /// Suppress all output except errors
     #[arg(short, long)]
@@ -91,56 +64,14 @@ pub fn run(args: GenerateArgs) -> Result<()> {
         print_banner();
     }
 
-    // Set up device
-    let device = if args.use_metal {
-        #[cfg(feature = "metal")]
-        {
-            candle_core::Device::new_metal(0)?
-        }
-        #[cfg(not(feature = "metal"))]
-        {
-            anyhow::bail!("Metal feature not enabled. Rebuild with --features metal");
-        }
-    } else {
-        candle_core::Device::Cpu
-    };
-
-    if !quiet {
-        println!("  {} Using device: {:?}", "▶".cyan(), device);
-    }
-
-    // Load model
-    info!(quiet, "{} Loading model...", "▶".cyan());
-
-    let quantized = args.quantized;
-
-    let mut model = if quantized {
-        #[cfg(feature = "quantized")]
-        {
-            TTSModel::load_quantized_with_params_device(
-                &args.variant,
-                pocket_tts::config::defaults::TEMPERATURE,
-                args.lsd_decode_steps,
-                args.eos_threshold,
-                args.noise_clamp,
-                &device,
-            )?
-        }
-        #[cfg(not(feature = "quantized"))]
-        {
-            anyhow::bail!("Quantization feature not enabled. Rebuild with --features quantized");
-        }
-    } else {
-        TTSModel::load_with_params_device(
-            &args.variant,
-            pocket_tts::config::defaults::TEMPERATURE,
-            args.lsd_decode_steps,
-            args.eos_threshold,
-            args.noise_clamp,
-            &device,
-        )?
-    };
-
+    info!(
+        quiet,
+        "{} Loading model {} on {}...",
+        "▶".cyan(),
+        args.model.describe().yellow(),
+        args.model.device
+    );
+    let mut model = args.model.load()?;
     info!(
         quiet,
         "  {} Model loaded (sample rate: {}Hz)",
@@ -148,7 +79,6 @@ pub fn run(args: GenerateArgs) -> Result<()> {
         model.sample_rate
     );
 
-    model.temp = args.temperature.unwrap_or(model.config.default_temperature);
     model.frames_after_eos = args.frames_after_eos;
 
     // Resolve voice

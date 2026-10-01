@@ -1,11 +1,12 @@
 use crate::ModelState;
+use crate::modules::linear::{Linear, linear_no_bias};
 use crate::modules::rope::RotaryEmbedding;
 use crate::voice_state::{
     ATTN_K_BUF_KEY, ATTN_LEN_KEY, ATTN_POS_KEY, ATTN_V_BUF_KEY, AttentionCursor,
     read_attention_cursor, write_attention_cursor,
 };
 use candle_core::{DType, Result, Tensor};
-use candle_nn::{Linear, Module, VarBuilder};
+use candle_nn::{Module, VarBuilder};
 use std::collections::HashMap;
 
 fn ring_chunks(buf: &Tensor, head: usize, len: usize) -> Result<Vec<Tensor>> {
@@ -56,8 +57,8 @@ impl StreamingMultiheadAttention {
         // num_kv = num_heads
         // kv_dim = (embed_dim // num_heads) * num_kv -> so embed_dim
         // out_dim += 2 * kv_dim -> so 3 * embed_dim
-        let in_proj = candle_nn::linear_no_bias(embed_dim, 3 * embed_dim, vb.pp("in_proj"))?;
-        let out_proj = candle_nn::linear_no_bias(embed_dim, embed_dim, vb.pp("out_proj"))?;
+        let in_proj = linear_no_bias(embed_dim, 3 * embed_dim, vb.pp("in_proj"))?;
+        let out_proj = linear_no_bias(embed_dim, embed_dim, vb.pp("out_proj"))?;
 
         Ok(Self {
             embed_dim,

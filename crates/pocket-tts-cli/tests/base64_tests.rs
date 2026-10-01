@@ -4,7 +4,6 @@ use axum::{
 };
 use base64::{Engine as _, engine::general_purpose};
 use pocket_tts::TTSModel;
-use pocket_tts_cli::commands::serve::UiMode;
 use pocket_tts_cli::server::{routes, state::AppState};
 use pocket_tts_cli::voice::resolve_voice;
 use serde_json::json;
@@ -29,10 +28,7 @@ fn create_test_app() -> Option<axum::Router> {
         }
     };
 
-    let wasm_pkg_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../pocket-tts/pkg")
-        .to_path_buf();
-    let state = AppState::new(model, default_voice, 64, UiMode::Standard, wasm_pkg_dir);
+    let state = AppState::new(model, default_voice, 64);
     Some(routes::create_router(state))
 }
 

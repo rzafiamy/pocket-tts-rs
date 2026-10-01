@@ -41,11 +41,20 @@ pub fn sdpa(
     is_causal: bool,
     context_window: Option<usize>,
 ) -> Result<Tensor> {
+    let (_b, _h, q_len, _dim) = q.dims4()?;
+    let kv_len = k.dims()[2];
+
+    // Decoding one query needs no mask: read the KV cache in place (strided
+    // matmuls) instead of copying it, and K once more transposed, every step.
+    if can_skip_mask_for_single_query(q_len, kv_len, is_causal, context_window) {
+        let scores = (q.contiguous()?.matmul(&k.t()?)? * scale)?;
+        let probs = candle_nn::ops::softmax_last_dim(&scores)?;
+        return probs.matmul(v);
+    }
+
     let q = q.contiguous()?;
     let k = k.contiguous()?;
     let v = v.contiguous()?;
-    let (_b, _h, q_len, _dim) = q.dims4()?;
-    let kv_len = k.dims()[2];
 
     // Adaptive strategy:
     // For small Q (decoding, chunked prefill), tiling overhead hurts performance.
@@ -135,39 +144,31 @@ fn generate_mask_chunk(
     context_window: Option<usize>,
     device: &candle_core::Device,
 ) -> Result<Tensor> {
+    // Built on the host: a dozen tiny tensor ops per call cost more than
+    // the attention itself at Mimi's sizes.
     let shift = k_len.saturating_sub(total_q_len);
-
-    // pos_q: [num_q, 1]
-    let pos_q = (Tensor::arange(0u32, num_q as u32, device)?
-        .to_dtype(candle_core::DType::F32)?
-        .affine(1.0, (start_q + shift) as f64)?
-        .reshape((num_q, 1)))?;
-
-    // pos_k: [1, k_len]
-    let pos_k = Tensor::arange(0u32, k_len as u32, device)?
-        .to_dtype(candle_core::DType::F32)?
-        .reshape((1, k_len))?;
-
-    let mut mask = Tensor::zeros((num_q, k_len), candle_core::DType::F32, device)?;
-
-    if is_causal {
-        let is_future = pos_k.broadcast_gt(&pos_q)?;
-        mask = is_future.where_cond(
-            &Tensor::full(f32::NEG_INFINITY, (num_q, k_len), device)?,
-            &mask,
-        )?;
+    let mut mask = vec![0f32; num_q * k_len];
+    for i in 0..num_q {
+        let pos_q = (start_q + shift + i) as i64;
+        for (j, m) in mask[i * k_len..(i + 1) * k_len].iter_mut().enumerate() {
+            let pos_k = j as i64;
+            let future = is_causal && pos_k > pos_q;
+            let too_old = context_window.is_some_and(|ctx| pos_k <= pos_q - ctx as i64);
+            if future || too_old {
+                *m = f32::NEG_INFINITY;
+            }
+        }
     }
+    Tensor::from_vec(mask, (1, 1, num_q, k_len), device)
+}
 
-    if let Some(ctx) = context_window {
-        let limit = pos_q.broadcast_sub(&Tensor::full(ctx as f32, (num_q, 1), device)?)?;
-        let is_out = pos_k.broadcast_le(&limit)?;
-        mask = is_out.where_cond(
-            &Tensor::full(f32::NEG_INFINITY, (num_q, k_len), device)?,
-            &mask,
-        )?;
+/// `a @ b` reading `b` in place when its layout allows (a narrowed KV cache
+/// usually does), copying it otherwise.
+fn matmul_strided(a: &Tensor, b: &Tensor) -> Result<Tensor> {
+    match a.matmul(b) {
+        Ok(y) => Ok(y),
+        Err(_) => a.matmul(&b.contiguous()?),
     }
-
-    mask.reshape((1, 1, num_q, k_len))
 }
 
 /// Chunked version of SDPA that accepts a list of Key/Value pointers
@@ -190,20 +191,9 @@ pub fn sdpa_chunked(
     let q = q.contiguous()?;
     let (b, h, q_len, d) = q.dims4()?;
 
-    // Ensure all KV chunks are contiguous for CPU matmul compatibility
-    let k_chunks: Vec<Tensor> = k_chunks
-        .iter()
-        .map(|t| t.contiguous())
-        .collect::<Result<_>>()?;
-    let v_chunks: Vec<Tensor> = v_chunks
-        .iter()
-        .map(|t| t.contiguous())
-        .collect::<Result<_>>()?;
-
     // Fast path for single chunk
     if k_chunks.len() == 1 {
-        let k_t = k_chunks[0].transpose(2, 3)?.contiguous()?;
-        let scores = (q.matmul(&k_t)? * scale)?;
+        let scores = (matmul_strided(&q, &k_chunks[0].t()?)? * scale)?;
         let kv_len = k_chunks[0].dims()[2];
 
         let masked_scores =
@@ -224,8 +214,8 @@ pub fn sdpa_chunked(
                 scores
             };
 
-        let probs = candle_nn::ops::softmax(&masked_scores, D::Minus1)?;
-        return probs.matmul(&v_chunks[0]);
+        let probs = candle_nn::ops::softmax_last_dim(&masked_scores)?;
+        return matmul_strided(&probs, &v_chunks[0]);
     }
 
     // 1. Compute scores against all K chunks
@@ -234,8 +224,7 @@ pub fn sdpa_chunked(
 
     for k_chunk in k_chunks {
         total_kv_len += k_chunk.dims()[2];
-        let k_t = k_chunk.transpose(2, 3)?.contiguous()?;
-        let score_chunk = (q.matmul(&k_t)? * scale)?;
+        let score_chunk = (matmul_strided(&q, &k_chunk.t()?)? * scale)?;
         score_chunks.push(score_chunk);
     }
 
@@ -262,7 +251,7 @@ pub fn sdpa_chunked(
         };
 
     // 4. Softmax
-    let probs = candle_nn::ops::softmax(&masked_scores, D::Minus1)?;
+    let probs = candle_nn::ops::softmax_last_dim(&masked_scores.contiguous()?)?;
 
     // 5. Compute Weighted Sum: Probs @ V
     let mut output = Tensor::zeros((b, h, q_len, d), dtype, device)?;
@@ -271,7 +260,7 @@ pub fn sdpa_chunked(
     for v_chunk in v_chunks {
         let chunk_len = v_chunk.dims()[2];
         let probs_chunk = probs.narrow(3, offset, chunk_len)?.contiguous()?;
-        let out_chunk = probs_chunk.matmul(&v_chunk)?;
+        let out_chunk = matmul_strided(&probs_chunk, v_chunk)?;
         output = (output + out_chunk)?;
         offset += chunk_len;
     }

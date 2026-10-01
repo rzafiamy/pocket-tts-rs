@@ -328,29 +328,6 @@ fn test_generate_with_pauses_adds_silence() {
     );
 }
 
-#[test]
-// #[ignore = "requires HF_TOKEN and model download"]
-#[cfg(feature = "quantized")]
-fn test_load_quantized_model() {
-    if !require_hf_token("test_load_quantized_model") {
-        return;
-    }
-
-    use pocket_tts::TTSModel;
-    let _guard = model_init_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let model = TTSModel::load_quantized("b6369a24").expect("Failed to load quantized model");
-
-    // Verify model loaded
-    assert_eq!(model.sample_rate, 24000);
-    assert_eq!(model.dim, 1024);
-
-    // Verify is_quantized flag (currently returns false as placeholder)
-    // When real quantization is implemented, this should return true
-    assert!(!model.is_quantized()); // Placeholder behavior
-}
-
 // Tests that don't require model download
 #[test]
 fn test_pause_module_integration() {
@@ -369,29 +346,4 @@ fn test_pause_module_integration() {
     let has_1000ms = parsed.pauses.iter().any(|p| p.duration_ms == 1000);
     assert!(has_500ms, "Should have 500ms pause");
     assert!(has_1000ms, "Should have 1000ms (1s) pause");
-}
-
-#[test]
-fn test_quantize_module_integration() {
-    use candle_core::{Device, Tensor};
-    use pocket_tts::{QuantizeConfig, QuantizedTensor};
-
-    let device = Device::Cpu;
-    let tensor = Tensor::new(&[1.0f32, 2.0, -3.0, 4.5, -2.1, 0.5, -0.5, 1.5], &device).unwrap();
-
-    // Test quantization
-    let quantized = QuantizedTensor::quantize(&tensor, 256).unwrap();
-
-    // Verify scale is reasonable
-    let scale = quantized.scale();
-    assert!(scale > 0.0, "Scale should be positive");
-
-    // Verify memory savings
-    let savings = quantized.theoretical_memory_savings();
-    assert_eq!(savings, 4.0, "int8 should give 4x memory savings");
-
-    // Test config
-    let config = QuantizeConfig::default();
-    assert_eq!(config.num_levels, 256);
-    assert!(config.skip_layers.contains(&"embed".to_string()));
 }

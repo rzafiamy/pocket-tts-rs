@@ -91,3 +91,4 @@ CLAUDE.md
 QWEN.md
 .claude/
 temp-candle/.venv-parity/
+/models/

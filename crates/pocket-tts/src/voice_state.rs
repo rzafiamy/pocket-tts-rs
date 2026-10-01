@@ -100,7 +100,7 @@ pub fn get_attention_cursor(state: &ModelState, module_name: &str) -> AttentionC
 /// This is used after processing tokens to update position information
 /// for streaming generation.
 pub fn increment_steps(state: &mut ModelState, key: &str, increment: usize) {
-    for (_module_name, module_state) in state.iter_mut() {
+    for module_state in state.values_mut() {
         if let Some(step_tensor) = module_state.get_mut(key)
             && let Ok(current) = step_tensor.to_scalar::<i64>()
             && let Ok(new_tensor) = Tensor::new(current + increment as i64, step_tensor.device())
@@ -129,6 +129,28 @@ pub fn set_offset(state: &mut ModelState, module_name: &str, offset: usize) -> R
         .unwrap_or(candle_core::Device::Cpu);
     module_state.insert("offset".to_string(), Tensor::new(offset as i64, &device)?);
     Ok(())
+}
+
+/// Attention state holding `len` cached positions: `k`, `v` as `[B, H, len, D]`.
+pub fn attention_state(
+    k: Tensor,
+    v: Tensor,
+    len: usize,
+    device: &candle_core::Device,
+) -> Result<HashMap<String, Tensor>> {
+    let mut state = HashMap::new();
+    state.insert(ATTN_K_BUF_KEY.to_string(), k);
+    state.insert(ATTN_V_BUF_KEY.to_string(), v);
+    write_attention_cursor(
+        &mut state,
+        AttentionCursor {
+            pos: len,
+            len,
+            head: 0,
+        },
+        device,
+    )?;
+    Ok(state)
 }
 
 #[cfg(test)]

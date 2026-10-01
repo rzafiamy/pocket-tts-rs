@@ -35,6 +35,8 @@ pub struct TTSModel {
     /// Config name the model was loaded from (`english`, `french_24l`, ...);
     /// selects the predefined voices. Empty when loaded from bytes.
     pub variant: String,
+    /// Voices shipped inside a GGUF model file, by name.
+    pub embedded_voices: std::sync::Arc<std::collections::HashMap<String, ModelState>>,
     /// Frames generated after EOS; `None` uses the model's recommendation or
     /// a guess from the chunk length.
     pub frames_after_eos: Option<usize>,
@@ -101,9 +103,7 @@ impl TTSModel {
         noise_clamp: Option<f32>,
         device: &Device,
     ) -> Result<Self> {
-        // Find config file - look relative to the Rust crate, then fall back to Python location
-        let config_path = find_config_path(variant)?;
-        let config = load_config(&config_path)?;
+        let config = resolve_config(variant)?;
 
         let mut model = Self::from_config(
             config,
@@ -115,79 +115,6 @@ impl TTSModel {
         )?;
         model.variant = variant.to_string();
         Ok(model)
-    }
-
-    /// Load model with quantized weights for reduced memory footprint
-    ///
-    /// This applies simulated int8 quantization to applicable layers,
-    /// reducing memory usage while maintaining acceptable quality.
-    ///
-    /// # Arguments
-    /// * `variant` - Model variant (e.g., "b6369a24")
-    ///
-    /// # Returns
-    /// TTSModel with quantized weights
-    ///
-    /// # Note
-    /// Quantization uses 256 discrete levels (int8-equivalent).
-    /// Some layers (embeddings, output projections) are kept in full precision.
-    #[cfg(feature = "quantized")]
-    pub fn load_quantized(variant: &str) -> Result<Self> {
-        Self::load_quantized_with_params(
-            variant,
-            defaults::TEMPERATURE,
-            defaults::LSD_DECODE_STEPS,
-            defaults::EOS_THRESHOLD,
-        )
-    }
-
-    /// Load quantized model with custom generation parameters
-    #[cfg(feature = "quantized")]
-    pub fn load_quantized_with_params(
-        variant: &str,
-        temp: f32,
-        lsd_decode_steps: usize,
-        eos_threshold: f32,
-    ) -> Result<Self> {
-        Self::load_quantized_with_params_device(
-            variant,
-            temp,
-            lsd_decode_steps,
-            eos_threshold,
-            None,
-            &Device::Cpu,
-        )
-    }
-
-    /// Load quantized model with custom generation parameters and specific device
-    #[cfg(feature = "quantized")]
-    pub fn load_quantized_with_params_device(
-        variant: &str,
-        temp: f32,
-        lsd_decode_steps: usize,
-        eos_threshold: f32,
-        noise_clamp: Option<f32>,
-        device: &Device,
-    ) -> Result<Self> {
-        // Load model normally first
-        let model = Self::load_with_params_device(
-            variant,
-            temp,
-            lsd_decode_steps,
-            eos_threshold,
-            noise_clamp,
-            device,
-        )?;
-        // ... (quantization placeholder logic remains same)
-        Ok(model)
-    }
-
-    /// Check if this model was loaded with quantization
-    #[cfg(feature = "quantized")]
-    pub fn is_quantized(&self) -> bool {
-        // In current implementation, we don't actually store quantized weights
-        // This is a placeholder for future implementation
-        false
     }
 
     /// Create model from configuration
@@ -202,7 +129,6 @@ impl TTSModel {
         let dtype = DType::F32;
 
         // Download weights
-        #[cfg(not(target_arch = "wasm32"))]
         {
             let weights_path = config
                 .weights_path
@@ -250,14 +176,33 @@ impl TTSModel {
                 vb,
             )
         }
+    }
 
-        #[cfg(target_arch = "wasm32")]
-        {
-            let _ = (config, temp, lsd_decode_steps, eos_threshold, device, dtype);
-            anyhow::bail!(
-                "WASM requires from_bytes or providing a pre-built VarBuilder. Use load_from_bytes instead."
-            );
-        }
+    /// Load a single-file GGUF model written by `gguf::convert`.
+    pub fn load_gguf<P: AsRef<std::path::Path>>(path: P, device: &Device) -> Result<Self> {
+        let g = crate::gguf::read(path.as_ref(), device)?;
+        let vb = VarBuilder::from_tensors(g.dense, DType::F32, device);
+        let _scope = crate::modules::linear::QuantScope::enter(g.quant);
+        let conditioner = LUTConditioner::new_from_bytes(
+            g.config.flow_lm.lookup_table.n_bins,
+            g.tokenizer_json.as_bytes(),
+            g.config.flow_lm.lookup_table.dim,
+            g.config.flow_lm.transformer.d_model,
+            vb.pp("flow_lm.conditioner"),
+        )?;
+        let temp = g.config.default_temperature;
+        let mut model = Self::from_config_and_vb(
+            g.config,
+            temp,
+            defaults::LSD_DECODE_STEPS,
+            defaults::EOS_THRESHOLD,
+            None,
+            conditioner,
+            vb,
+        )?;
+        model.variant = g.variant;
+        model.embedded_voices = std::sync::Arc::new(g.voices);
+        Ok(model)
     }
 
     /// Load model from byte slices (useful for WASM)
@@ -456,6 +401,7 @@ impl TTSModel {
             sample_rate: config.mimi.sample_rate,
             config,
             variant: String::new(),
+            embedded_voices: Default::default(),
             frames_after_eos: None,
             temp,
             lsd_decode_steps,
@@ -488,7 +434,6 @@ impl TTSModel {
     /// Create voice state from audio prompt for voice cloning
     ///
     /// Encodes the audio through Mimi and projects to flow model space.
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn get_voice_state<P: AsRef<std::path::Path>>(&self, audio_path: P) -> Result<ModelState> {
         let (audio, sample_rate) = crate::audio::read_wav(audio_path)?;
 
@@ -508,7 +453,6 @@ impl TTSModel {
     /// Create voice state from a .safetensors voice: either a latent prompt
     /// (`audio_prompt`) or an exported model state (`<module>/<key>`, the
     /// format of `pocket-tts export-voice` and the per-language voices).
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn get_voice_state_from_prompt_file<P: AsRef<std::path::Path>>(
         &self,
         path: P,
@@ -945,9 +889,6 @@ fn import_model_state(
     tensors: &std::collections::HashMap<String, Tensor>,
     device: &Device,
 ) -> Result<ModelState> {
-    use crate::voice_state::{
-        ATTN_K_BUF_KEY, ATTN_V_BUF_KEY, AttentionCursor, write_attention_cursor,
-    };
     let mut state = init_states(1, 0);
     for (key, cache) in tensors {
         let Some(module) = key.strip_suffix("/cache") else {
@@ -970,19 +911,10 @@ fn import_model_state(
         let cache = cache.to_dtype(DType::F32)?.narrow(2, 0, offset)?;
         let k = cache.get(0)?.transpose(1, 2)?.contiguous()?;
         let v = cache.get(1)?.transpose(1, 2)?.contiguous()?;
-        let mut module_state = std::collections::HashMap::new();
-        module_state.insert(ATTN_K_BUF_KEY.to_string(), k);
-        module_state.insert(ATTN_V_BUF_KEY.to_string(), v);
-        write_attention_cursor(
-            &mut module_state,
-            AttentionCursor {
-                pos: offset,
-                len: offset,
-                head: 0,
-            },
-            device,
-        )?;
-        state.insert(format!("flow_lm.{module}"), module_state);
+        state.insert(
+            format!("flow_lm.{module}"),
+            crate::voice_state::attention_state(k, v, offset, device)?,
+        );
     }
     if state.is_empty() {
         anyhow::bail!("exported state has no attention caches");
@@ -990,56 +922,21 @@ fn import_model_state(
     Ok(state)
 }
 
-/// Find the config file path for a variant
-fn find_config_path(variant: &str) -> Result<std::path::PathBuf> {
-    let filename = format!("{}.yaml", variant);
-
-    // 1. Try relative to Rust crate (crates/pocket-tts/config)
-    let crate_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let crate_config = crate_path.join("config").join(&filename);
-    if crate_config.exists() {
-        return Ok(crate_config);
+/// Config for `variant`: a built-in name (`english`, `french_24l`, ...) or a
+/// path to a YAML file.
+pub fn resolve_config(variant: &str) -> Result<Config> {
+    if let Some(yaml) = crate::builtin_configs::get(variant) {
+        return Ok(serde_yaml::from_str(yaml)?);
     }
-
-    // 2. Try relative to workspace root (for tests/cli)
-    // Go up 2 levels if in crates/pocket-tts or crates/pocket-tts-cli
-    let mut current = crate_path.as_path();
-    for _ in 0..3 {
-        let python_config = current
-            .join("python-reference")
-            .join("pocket_tts")
-            .join("config")
-            .join(&filename);
-        if python_config.exists() {
-            return Ok(python_config);
-        }
-
-        // Also try new crates structure if running from cli
-        let crates_config = current
-            .join("crates")
-            .join("pocket-tts")
-            .join("config")
-            .join(&filename);
-        if crates_config.exists() {
-            return Ok(crates_config);
-        }
-
-        if let Some(parent) = current.parent() {
-            current = parent;
-        } else {
-            break;
-        }
+    let path = std::path::Path::new(variant);
+    if path.is_file() {
+        return load_config(path);
     }
-
-    // 3. Try current directory
-    let local_path = std::path::PathBuf::from("config").join(&filename);
-    if local_path.exists() {
-        return Ok(local_path);
-    }
-
     anyhow::bail!(
-        "Config file {} not found. Checked crate-relative, workspace, and current directory.",
-        filename
+        "Unknown variant '{variant}'. Built-in variants: {}",
+        crate::builtin_configs::names()
+            .collect::<Vec<_>>()
+            .join(", ")
     )
 }
 
@@ -1071,19 +968,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_find_config_path() {
-        // This MUST pass now that we've moved the config into the crate
-        let result = find_config_path("b6369a24");
-        assert!(result.is_ok(), "Config file should be found");
-        let path = result.unwrap();
-        assert!(path.exists(), "Config file path should exist");
-    }
-
-    #[test]
-    #[cfg(feature = "quantized")]
-    fn test_load_quantized_requires_feature() {
-        // This test only runs with --features quantized
-        // It verifies the load_quantized method exists and compiles
-        // Actual model loading requires HF_TOKEN
+    fn builtin_configs_parse() {
+        for name in crate::builtin_configs::names() {
+            let c = resolve_config(name).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_eq!(c.mimi.sample_rate, 24000, "{name}");
+        }
+        assert_eq!(
+            resolve_config("french")
+                .unwrap()
+                .flow_lm
+                .transformer
+                .num_layers,
+            6
+        );
+        assert!(resolve_config("klingon").is_err());
     }
 }

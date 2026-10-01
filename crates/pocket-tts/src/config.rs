@@ -151,6 +151,11 @@ fn default_temperature() -> f32 {
     defaults::TEMPERATURE
 }
 
+/// Parse configuration YAML
+pub fn parse_config(yaml: &str) -> anyhow::Result<Config> {
+    Ok(serde_yaml::from_str(yaml)?)
+}
+
 /// Load configuration from a YAML file
 pub fn load_config<P: AsRef<Path>>(path: P) -> anyhow::Result<Config> {
     let contents = std::fs::read_to_string(path)?;

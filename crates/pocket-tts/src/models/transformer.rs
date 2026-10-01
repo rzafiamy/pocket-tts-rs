@@ -1,10 +1,11 @@
 use crate::ModelState;
 use crate::modules::attention::StreamingMultiheadAttention;
+use crate::modules::linear::{Linear, linear_no_bias};
 use crate::modules::mlp::{LayerNorm, LayerScale};
 use crate::modules::rope::RotaryEmbedding;
 use crate::voice_state::get_attention_cursor;
 use candle_core::{Result, Tensor};
-use candle_nn::{Linear, Module, VarBuilder};
+use candle_nn::{Module, VarBuilder};
 
 #[derive(Clone)]
 pub struct StreamingTransformerLayer {
@@ -40,8 +41,8 @@ impl StreamingTransformerLayer {
         )?;
         let norm1 = LayerNorm::new(d_model, 1e-5, true, vb.pp("norm1"))?;
         let norm2 = LayerNorm::new(d_model, 1e-5, true, vb.pp("norm2"))?;
-        let linear1 = candle_nn::linear_no_bias(d_model, dim_feedforward, vb.pp("linear1"))?;
-        let linear2 = candle_nn::linear_no_bias(dim_feedforward, d_model, vb.pp("linear2"))?;
+        let linear1 = linear_no_bias(d_model, dim_feedforward, vb.pp("linear1"))?;
+        let linear2 = linear_no_bias(dim_feedforward, d_model, vb.pp("linear2"))?;
 
         let (layer_scale_1, layer_scale_2) = if let Some(init) = layer_scale {
             (
@@ -82,7 +83,11 @@ impl StreamingTransformerLayer {
 
         let x_orig = x.clone();
         let h = self.norm2.forward(&x)?;
-        let mut update = self.linear2.forward(&self.linear1.forward(&h)?.gelu()?)?;
+        let mut update = self
+            .linear2
+            .forward(&crate::modules::activations::gelu_tanh(
+                &self.linear1.forward(&h)?,
+            )?)?;
         if let Some(ls) = &self.layer_scale_2 {
             update = ls.forward(&update)?;
         }
@@ -192,7 +197,7 @@ impl ProjectedTransformer {
         )?;
 
         let input_proj = if d_model != input_dimension {
-            Some(candle_nn::linear_no_bias(
+            Some(linear_no_bias(
                 input_dimension,
                 d_model,
                 vb.pp("input_proj"),
@@ -206,7 +211,7 @@ impl ProjectedTransformer {
             if d_model == output_dim {
                 output_projs.push(None);
             } else {
-                output_projs.push(Some(candle_nn::linear_no_bias(
+                output_projs.push(Some(linear_no_bias(
                     d_model,
                     output_dim,
                     vb.pp(format!("output_projs.{}", i)),

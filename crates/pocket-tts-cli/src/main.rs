@@ -33,26 +33,35 @@ enum Commands {
 
     /// Start the HTTP API server
     ///
-    /// Runs a web server providing TTS generation via REST API.
-    /// Includes a web interface for interactive use.
+    /// Runs a web server providing TTS generation via REST API,
+    /// including an OpenAI-compatible /v1/audio/speech endpoint.
     Serve(commands::serve::ServeArgs),
 
-    /// Deprecated alias for `serve --ui wasm-experimental`
+    /// Convert a model to a single GGUF file
     ///
-    /// Starts the server with the experimental WASM-backed web UI.
-    WasmDemo(commands::wasm_demo::WasmDemoArgs),
+    /// Packs weights (linear layers quantized to --dtype), config, tokenizer
+    /// and predefined voices into one file for `--model`.
+    Convert(commands::convert::ConvertArgs),
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let args = Args::parse();
+    let threads = match &args.command {
+        Commands::Generate(a) => a.model.threads,
+        Commands::Serve(a) => a.model.threads,
+        Commands::Convert(_) => None,
+    };
+    // Before the async runtime starts its worker threads.
+    pocket_tts_cli::loader::configure_threads(threads);
 
     match args.command {
         Commands::Generate(cmd_args) => {
             // Generate is CPU-bound, run synchronously
             commands::generate::run(cmd_args)
         }
-        Commands::Serve(cmd_args) => commands::serve::run(cmd_args).await,
-        Commands::WasmDemo(cmd_args) => commands::wasm_demo::run(cmd_args).await,
+        Commands::Serve(cmd_args) => {
+            tokio::runtime::Runtime::new()?.block_on(commands::serve::run(cmd_args))
+        }
+        Commands::Convert(cmd_args) => commands::convert::run(cmd_args),
     }
 }
