@@ -302,6 +302,22 @@ impl LUTConditioner {
         Ok(self.embed.forward(tokens)?)
     }
 
+    /// Token ids for `text`, as Python's `Tokenizer.encode`.
+    pub fn encode(&self, text: &str) -> Result<Vec<u32>> {
+        let encoding = self
+            .tokenizer
+            .encode(text, true)
+            .map_err(|e| anyhow::anyhow!("Failed to encode text: {:?}", e))?;
+        Ok(encoding.get_ids().to_vec())
+    }
+
+    /// Text for token ids, as Python's `Tokenizer.decode`.
+    pub fn decode(&self, ids: &[u32]) -> Result<String> {
+        self.tokenizer
+            .decode(ids, true)
+            .map_err(|e| anyhow::anyhow!("Failed to decode tokens: {:?}", e))
+    }
+
     /// Count tokens in a text string without creating tensors.
     /// Used for accurate text splitting to avoid oversized chunks.
     pub fn count_tokens(&self, text: &str) -> Result<usize> {

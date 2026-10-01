@@ -12,14 +12,12 @@ use std::path::PathBuf;
 use crate::voice::{PREDEFINED_VOICES, resolve_voice};
 
 /// Default text shown when user runs without --text
-pub const DEFAULT_TEXT: &str =
-    "Hello world! I am Pocket TTS, running blazingly fast in Rust. I hope you'll like me.";
 
 #[derive(Parser, Debug)]
 pub struct GenerateArgs {
-    /// Text to synthesize (defaults to a greeting if not specified)
-    #[arg(short, long, default_value = DEFAULT_TEXT)]
-    pub text: String,
+    /// Text to synthesize (defaults to a greeting in the model's language)
+    #[arg(short, long)]
+    pub text: Option<String>,
 
     /// Voice for synthesis. Can be:
     /// - Predefined name: alba, marius, javert, jean, fantine, cosette, eponine, azelma
@@ -33,13 +31,15 @@ pub struct GenerateArgs {
     #[arg(short, long, default_value = "output.wav")]
     pub output: PathBuf,
 
-    /// Model variant (default: b6369a24)
-    #[arg(long, default_value = "b6369a24")]
+    /// Model variant: a language (`english`, `french`, `german`, `italian`,
+    /// `spanish`, `portuguese`, `dutch`), a `_24l` variant, or `b6369a24`
+    #[arg(long, default_value = "english")]
     pub variant: String,
 
-    /// Sampling temperature (higher = more variation)
-    #[arg(long, default_value = "0.7")]
-    pub temperature: f32,
+    /// Sampling temperature (higher = more variation; defaults to the model's
+    /// recommended value)
+    #[arg(long)]
+    pub temperature: Option<f32>,
 
     /// LSD decode steps (more steps = better quality, slower)
     #[arg(long, default_value = "1")]
@@ -114,12 +114,12 @@ pub fn run(args: GenerateArgs) -> Result<()> {
 
     let quantized = args.quantized;
 
-    let model = if quantized {
+    let mut model = if quantized {
         #[cfg(feature = "quantized")]
         {
             TTSModel::load_quantized_with_params_device(
                 &args.variant,
-                args.temperature,
+                pocket_tts::config::defaults::TEMPERATURE,
                 args.lsd_decode_steps,
                 args.eos_threshold,
                 args.noise_clamp,
@@ -133,7 +133,7 @@ pub fn run(args: GenerateArgs) -> Result<()> {
     } else {
         TTSModel::load_with_params_device(
             &args.variant,
-            args.temperature,
+            pocket_tts::config::defaults::TEMPERATURE,
             args.lsd_decode_steps,
             args.eos_threshold,
             args.noise_clamp,
@@ -148,8 +148,15 @@ pub fn run(args: GenerateArgs) -> Result<()> {
         model.sample_rate
     );
 
+    model.temp = args.temperature.unwrap_or(model.config.default_temperature);
+    model.frames_after_eos = args.frames_after_eos;
+
     // Resolve voice
-    let voice_display = args.voice.as_deref().unwrap_or("alba (default)");
+    let default_voice = format!(
+        "{} (default)",
+        pocket_tts::voices::default_voice(&model.variant)
+    );
+    let voice_display = args.voice.as_deref().unwrap_or(&default_voice);
     info!(
         quiet,
         "{} Using voice: {}",
@@ -162,10 +169,14 @@ pub fn run(args: GenerateArgs) -> Result<()> {
     info!(quiet, "  {} Voice ready", "✓".green());
 
     // Generate
+    let text = args
+        .text
+        .clone()
+        .unwrap_or_else(|| pocket_tts::voices::default_text(&model.variant).to_string());
     if args.stream {
-        run_streaming(&model, &args.text, &voice_state)
+        run_streaming(&model, &text, &voice_state)
     } else {
-        run_to_file(&model, &args, &voice_state, quiet)
+        run_to_file(&model, &args, &text, &voice_state, quiet)
     }
 }
 
@@ -190,6 +201,7 @@ fn run_streaming(model: &TTSModel, text: &str, voice_state: &pocket_tts::ModelSt
 fn run_to_file(
     model: &TTSModel,
     args: &GenerateArgs,
+    text: &str,
     voice_state: &pocket_tts::ModelState,
     quiet: bool,
 ) -> Result<()> {
@@ -199,10 +211,10 @@ fn run_to_file(
         quiet,
         "{} Generating: \"{}\"",
         "▶".cyan(),
-        truncate_text(&args.text, 60).italic()
+        truncate_text(text, 60).italic()
     );
 
-    let total_steps = model.estimate_generation_steps(&args.text) as u64;
+    let total_steps = model.estimate_generation_steps(text) as u64;
 
     let pb = if quiet {
         ProgressBar::hidden()
@@ -223,7 +235,7 @@ fn run_to_file(
     let mut audio_chunks = Vec::new();
     let mut total_samples = 0;
 
-    for chunk_res in model.generate_stream_long(&args.text, voice_state) {
+    for chunk_res in model.generate_stream_long(text, voice_state) {
         let chunk = chunk_res?;
         let dims = chunk.dims();
         let samples = if dims.len() == 2 { dims[1] } else { dims[0] };

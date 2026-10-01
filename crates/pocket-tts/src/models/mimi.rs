@@ -65,6 +65,9 @@ impl MimiModel {
         channels: usize,
         dimension: usize,        // The quantizer input dimension (32)
         output_dimension: usize, // The decoder input dimension (512)
+        seanet_dimension: usize,
+        inner_dim: Option<usize>, // downsample output channels (newer models: 32)
+        outer_dim: Option<usize>, // upsample input channels
         name: &str,
         vb: VarBuilder,
     ) -> Result<Self> {
@@ -75,13 +78,15 @@ impl MimiModel {
             (
                 Some(ConvDownsample1d::new(
                     stride,
-                    output_dimension,
+                    seanet_dimension,
+                    inner_dim.unwrap_or(seanet_dimension),
                     &format!("{}.downsample", name),
                     vb.pp("downsample"),
                 )?),
                 Some(ConvTrUpsample1d::new(
                     stride,
-                    output_dimension,
+                    seanet_dimension,
+                    outer_dim.unwrap_or(seanet_dimension),
                     &format!("{}.upsample", name),
                     vb.pp("upsample"),
                 )?),
@@ -241,6 +246,9 @@ mod tests {
             1,
             128,
             512,
+            128,
+            None,
+            None,
             "mimi",
             vb.pp("mimi"),
         )?;

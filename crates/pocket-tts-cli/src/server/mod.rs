@@ -49,12 +49,12 @@ pub async fn start_server(args: ServeArgs) -> Result<()> {
     }
 
     // Load model with configured parameters
-    let model = if args.quantized {
+    let mut model = if args.quantized {
         #[cfg(feature = "quantized")]
         {
             TTSModel::load_quantized_with_params(
                 &args.variant,
-                args.temperature,
+                pocket_tts::config::defaults::TEMPERATURE,
                 args.lsd_decode_steps,
                 args.eos_threshold,
             )?
@@ -66,17 +66,22 @@ pub async fn start_server(args: ServeArgs) -> Result<()> {
     } else {
         TTSModel::load_with_params(
             &args.variant,
-            args.temperature,
+            pocket_tts::config::defaults::TEMPERATURE,
             args.lsd_decode_steps,
             args.eos_threshold,
         )?
     };
 
+    model.temp = args.temperature.unwrap_or(model.config.default_temperature);
     println!("  ✓ Model loaded (sample rate: {}Hz)", model.sample_rate);
 
     // Pre-load default voice
-    println!("  Loading default voice: {}...", args.voice);
-    let default_voice_state = resolve_voice(&model, Some(&args.voice))?;
+    let default_voice = args
+        .voice
+        .clone()
+        .unwrap_or_else(|| pocket_tts::voices::default_voice(&model.variant).to_string());
+    println!("  Loading default voice: {default_voice}...");
+    let default_voice_state = resolve_voice(&model, Some(&default_voice))?;
     println!("  ✓ Default voice ready");
 
     let state = state::AppState::new(
@@ -92,7 +97,7 @@ pub async fn start_server(args: ServeArgs) -> Result<()> {
             .lock()
             .map_err(|_| anyhow::anyhow!("voice cache lock poisoned"))?;
         cache.put(
-            voice_cache_key(&args.voice),
+            voice_cache_key(&default_voice),
             state.default_voice_state.clone(),
         );
     }

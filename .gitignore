@@ -90,4 +90,4 @@ profile_output*
 CLAUDE.md
 QWEN.md
 .claude/
-temp-candle/
+temp-candle/.venv-parity/

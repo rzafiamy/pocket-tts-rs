@@ -12,13 +12,7 @@ use pocket_tts::weights::download_if_necessary;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 
-/// Predefined stock voices from kyutai/pocket-tts-without-voice-cloning
-pub const PREDEFINED_VOICES: &[&str] = &[
-    "alba", "marius", "javert", "jean", "fantine", "cosette", "eponine", "azelma",
-];
-
-/// HuggingFace repo for stock voice embeddings
-const STOCK_VOICE_REPO: &str = "kyutai/pocket-tts-without-voice-cloning";
+pub use pocket_tts::voices::PREDEFINED_VOICES;
 
 /// Build a stable cache key for a voice specification.
 ///
@@ -74,10 +68,7 @@ fn hash_str(s: &str) -> u64 {
 pub fn resolve_voice(model: &TTSModel, voice_spec: Option<&str>) -> Result<pocket_tts::ModelState> {
     match voice_spec {
         Some(spec) => resolve_voice_spec(model, spec),
-        None => {
-            // Default to "alba" stock voice
-            resolve_predefined_voice(model, "alba")
-        }
+        None => resolve_predefined_voice(model, pocket_tts::voices::default_voice(&model.variant)),
     }
 }
 
@@ -86,7 +77,7 @@ fn resolve_voice_spec(model: &TTSModel, spec: &str) -> Result<pocket_tts::ModelS
     let spec = spec.trim();
 
     // 1. Check if it's a predefined voice name
-    if PREDEFINED_VOICES.contains(&spec) {
+    if pocket_tts::voices::is_predefined(&model.variant, spec) {
         return resolve_predefined_voice(model, spec);
     }
 
@@ -120,7 +111,7 @@ fn resolve_voice_spec(model: &TTSModel, spec: &str) -> Result<pocket_tts::ModelS
 
 /// Resolve a predefined voice name to embeddings via HF Hub
 fn resolve_predefined_voice(model: &TTSModel, name: &str) -> Result<pocket_tts::ModelState> {
-    let hf_path = format!("hf://{}/embeddings/{}.safetensors", STOCK_VOICE_REPO, name);
+    let hf_path = pocket_tts::voices::predefined_voice_url(&model.variant, name);
 
     let local_path = download_if_necessary(&hf_path)
         .with_context(|| format!("Failed to download stock voice '{}'", name))?;

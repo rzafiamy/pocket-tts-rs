@@ -37,16 +37,17 @@ pub struct ServeArgs {
     pub port: u16,
 
     /// Default voice for API requests (can be overridden per-request)
-    #[arg(long, default_value = "alba")]
-    pub voice: String,
+    #[arg(long)]
+    pub voice: Option<String>,
 
-    /// Model variant
-    #[arg(long, default_value = "b6369a24")]
+    /// Model variant: a language (`english`, `french`, `german`, ...), a
+    /// `_24l` variant, or `b6369a24` for the original English model
+    #[arg(long, default_value = "english")]
     pub variant: String,
 
-    /// Sampling temperature
-    #[arg(long, default_value = "0.7")]
-    pub temperature: f32,
+    /// Sampling temperature (defaults to the model's recommended value)
+    #[arg(long)]
+    pub temperature: Option<f32>,
 
     /// LSD decode steps
     #[arg(long, default_value = "1")]

@@ -301,7 +301,11 @@ fn test_generate_with_pauses_adds_silence() {
     // The baseline generate() call has 1 tail.
     // Our generate_with_pauses() call has 2 segments, thus 2 tails.
     let mimi_frame_size = 1920;
-    let frames_after_eos = pocket_tts::tts_model::estimate_frames_after_eos("Hello");
+    let frames_after_eos =
+        pocket_tts::text_chunking::prepare_text_prompt("Hello", &model.text_options())
+            .unwrap()
+            .1
+            + 2;
     let extra_tail_samples = mimi_frame_size * frames_after_eos;
 
     let diff = with_pause_samples.saturating_sub(no_pause_samples);

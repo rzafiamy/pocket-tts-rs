@@ -35,9 +35,9 @@ pub async fn run(args: WasmDemoArgs) -> Result<()> {
     let serve_args = ServeArgs {
         host: args.host,
         port: args.port,
-        voice: "alba".to_string(),
+        voice: None,
         variant: "b6369a24".to_string(),
-        temperature: 0.7,
+        temperature: None,
         lsd_decode_steps: 1,
         eos_threshold: -4.0,
         quantized: false,

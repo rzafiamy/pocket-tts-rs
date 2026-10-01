@@ -193,6 +193,70 @@ pub fn normalize_peak(audio: &Tensor) -> anyhow::Result<Tensor> {
     }
 }
 
+/// Ends a voice prompt `[C, T]` on exactly 80 ms of silence (Python's
+/// `end_on_pause`).
+///
+/// Training prompts end inside the pause between two words. A prompt ending on
+/// speech makes the model continue that utterance, one ending on a long silence
+/// delays the onset. Trailing 20 ms frames more than 35 dB below the loudest
+/// are cut, the last 20 ms of what remains fades out, and 80 ms of zeros follow.
+pub fn end_on_pause(wav: &Tensor, sample_rate: usize) -> anyhow::Result<Tensor> {
+    const PAUSE_SEC: f64 = 0.08;
+    const FADE_SEC: f64 = 0.02;
+    const FLOOR_DB: f32 = 35.0;
+
+    let (channels, total) = wav.dims2()?;
+    let frame = ((0.02 * sample_rate as f64) as usize).max(1);
+    let n = total / frame;
+    if n == 0 {
+        return Ok(wav.clone());
+    }
+    let data: Vec<Vec<f32>> = wav.to_dtype(candle_core::DType::F32)?.to_vec2()?;
+    // RMS per frame, pooled over channels.
+    let db: Vec<f32> = (0..n)
+        .map(|f| {
+            let sum: f64 = data
+                .iter()
+                .flat_map(|ch| &ch[f * frame..(f + 1) * frame])
+                .map(|&x| (x as f64) * (x as f64))
+                .sum();
+            let rms = (sum / (channels * frame) as f64).sqrt() as f32;
+            20.0 * (rms + 1e-12).log10()
+        })
+        .collect();
+    let max_db = db.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let last_loud = db
+        .iter()
+        .rposition(|&d| d > max_db - FLOOR_DB)
+        .unwrap_or(n - 1);
+    let end = (last_loud + 1) * frame;
+    let fade = ((FADE_SEC * sample_rate as f64) as usize).min(end);
+    let pause = (PAUSE_SEC * sample_rate as f64) as usize;
+
+    let out: Vec<f32> = data
+        .iter()
+        .flat_map(|ch| {
+            let mut v = ch[..end].to_vec();
+            for (i, x) in v[end - fade..].iter_mut().enumerate() {
+                // torch.linspace(1, 0, fade)
+                let w = if fade > 1 {
+                    1.0 - i as f32 / (fade - 1) as f32
+                } else {
+                    1.0
+                };
+                *x *= w;
+            }
+            v.extend(std::iter::repeat_n(0.0, pause));
+            v
+        })
+        .collect();
+    Ok(Tensor::from_vec(
+        out,
+        (channels, end + pause),
+        wav.device(),
+    )?)
+}
+
 // Matches Python's scipy.signal.resample_poly behavior
 pub fn resample(audio: &Tensor, from_rate: u32, to_rate: u32) -> anyhow::Result<Tensor> {
     if from_rate == to_rate {

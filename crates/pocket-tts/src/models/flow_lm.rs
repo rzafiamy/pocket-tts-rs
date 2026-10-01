@@ -4,17 +4,23 @@ use crate::modules::mlp::{LayerNorm, ModulationParams, SimpleMLPAdaLN};
 use candle_core::{Result, Tensor};
 use candle_nn::{Linear, Module, VarBuilder};
 
-pub fn lsd_decode(
+/// Integrates the sampler head from noise `x_0`, one modulation set per step.
+///
+/// LSD and flow matching both take Euler steps of size `1/n`; the drifting
+/// head is one-step and its output is the sample itself.
+pub fn sampler_decode(
     flow_net: &SimpleMLPAdaLN,
     modulations: &[Vec<ModulationParams>],
     x_0: &Tensor,
 ) -> Result<Tensor> {
+    if flow_net.num_time_conds() == 0 {
+        return flow_net.forward_step_cached(x_0, &modulations[0]);
+    }
     let mut current = x_0.clone();
     let num_steps = modulations.len();
 
     let step_factor = 1.0 / num_steps as f64;
     for step_mod in modulations {
-        // Use forward_step_cached with pre-computed modulation batch for this ODE step
         let flow_dir = flow_net.forward_step_cached(&current, step_mod)?;
         current = (current + flow_dir.affine(step_factor, 0.0)?)?;
     }
@@ -158,7 +164,7 @@ impl FlowLMModel {
             .flow_net
             .precompute_modulations(&c_emb, time_embeddings)?;
 
-        let next_latent = lsd_decode(&self.flow_net, &modulations, &noise)?;
+        let next_latent = sampler_decode(&self.flow_net, &modulations, &noise)?;
 
         Ok((next_latent, is_eos))
     }

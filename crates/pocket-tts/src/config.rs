@@ -8,6 +8,14 @@ use std::path::Path;
 pub struct FlowConfig {
     pub dim: usize,
     pub depth: usize,
+    /// Sampler head objective: "lsd" (two time conditions), "flow_matching"
+    /// (one) or "drifting" (none, one-step).
+    #[serde(default = "default_flow_type", rename = "type")]
+    pub flow_type: String,
+}
+
+fn default_flow_type() -> String {
+    "lsd".to_string()
 }
 
 /// Transformer configuration for FlowLM
@@ -38,6 +46,9 @@ pub struct FlowLMConfig {
     pub lookup_table: LookupTableConfig,
     #[serde(default)]
     pub weights_path: Option<String>,
+    /// Prepend the learned `bos_before_voice` embedding to voice prompts.
+    #[serde(default)]
+    pub insert_bos_before_voice: bool,
 }
 
 /// SEANet encoder/decoder configuration
@@ -94,6 +105,12 @@ pub struct MimiConfig {
     pub quantizer: QuantizerConfig,
     #[serde(default)]
     pub weights_path: Option<String>,
+    /// Output channels of the encoder downsample conv (defaults to seanet.dimension).
+    #[serde(default)]
+    pub inner_dim: Option<usize>,
+    /// Input channels of the decoder upsample conv (defaults to seanet.dimension).
+    #[serde(default)]
+    pub outer_dim: Option<usize>,
 }
 
 /// Root configuration
@@ -105,6 +122,33 @@ pub struct Config {
     pub weights_path: Option<String>,
     #[serde(default)]
     pub weights_path_without_voice_cloning: Option<String>,
+
+    // Text preparation, see Python's models/text_chunking.py.
+    #[serde(default)]
+    pub pad_with_spaces_for_short_inputs: bool,
+    #[serde(default)]
+    pub remove_semicolons: bool,
+    #[serde(default = "default_true")]
+    pub append_terminal_punctuation: bool,
+    #[serde(default = "default_true")]
+    pub capitalize_first_letter: bool,
+    /// Characters absent from the training data, mapped to a replacement
+    /// (an empty string deletes them).
+    #[serde(default)]
+    pub replace_characters: std::collections::BTreeMap<String, String>,
+
+    #[serde(default)]
+    pub model_recommended_frames_after_eos: Option<usize>,
+    #[serde(default = "default_temperature")]
+    pub default_temperature: f32,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_temperature() -> f32 {
+    defaults::TEMPERATURE
 }
 
 /// Load configuration from a YAML file
@@ -116,11 +160,16 @@ pub fn load_config<P: AsRef<Path>>(path: P) -> anyhow::Result<Config> {
 
 /// Default generation parameters (matching Python's default_parameters.py)
 pub mod defaults {
-    pub const TEMPERATURE: f32 = 0.7;
+    pub const TEMPERATURE: f32 = 0.3;
     pub const LSD_DECODE_STEPS: usize = 1;
     pub const NOISE_CLAMP: Option<f32> = None;
     pub const EOS_THRESHOLD: f32 = -4.0;
-    pub const DEFAULT_VARIANT: &str = "b6369a24";
+    pub const DEFAULT_VARIANT: &str = "english";
+    pub const MAX_TOKENS_PER_CHUNK: usize = 50;
+    /// EOS is ignored on the first generated frames of a chunk.
+    pub const MIN_FRAMES_BEFORE_EOS: usize = 6;
+    pub const TOKENS_PER_SECOND_ESTIMATE: f64 = 3.0;
+    pub const GEN_SECONDS_PADDING: f64 = 2.0;
 }
 
 #[cfg(test)]

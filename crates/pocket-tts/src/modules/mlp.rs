@@ -290,31 +290,51 @@ impl SimpleMLPAdaLN {
         let mod_vec = self.precompute_modulations(c_emb, &t_combined)?;
         self.forward_step_cached(x, &mod_vec[0])
     }
+
+    pub fn num_time_conds(&self) -> usize {
+        self.num_time_conds
+    }
 }
 
 impl SimpleMLPAdaLN {
+    /// Time embeddings for each sampler step, `[num_steps, model_channels]`.
+    ///
+    /// LSD conditions on (start, target) times `(i/n, (i+1)/n)`, flow matching
+    /// on `i/n` alone, and the drifting head on nothing: it gets one all-zero
+    /// row so the condition embedding passes through unchanged.
     pub fn compute_time_embeddings(
         &self,
         num_steps: usize,
         device: &candle_core::Device,
         dtype: DType,
     ) -> Result<Tensor> {
+        if self.num_time_conds == 0 {
+            let channels = self.input_proj.weight().dim(0)?;
+            return Tensor::zeros((1, channels), dtype, device);
+        }
         let mut embeddings = Vec::with_capacity(num_steps);
         for i in 0..num_steps {
-            let s = i as f64 / num_steps as f64;
-            let t = (i + 1) as f64 / num_steps as f64;
-
-            // 1D Tensors [1]
-            let s_tensor = Tensor::new(&[s as f32], device)?.to_dtype(dtype)?;
-            let t_tensor = Tensor::new(&[t as f32], device)?.to_dtype(dtype)?;
-
-            let t0 = self.time_embeds[0].forward(&s_tensor)?;
-            let t1 = self.time_embeds[1].forward(&t_tensor)?;
-            let t_combined = ((t0 + t1)? / self.num_time_conds as f64)?;
+            let times = if self.num_time_conds == 2 {
+                vec![
+                    i as f64 / num_steps as f64,
+                    (i + 1) as f64 / num_steps as f64,
+                ]
+            } else {
+                vec![i as f64 / num_steps as f64]
+            };
+            let mut sum: Option<Tensor> = None;
+            for (embed, time) in self.time_embeds.iter().zip(times) {
+                let t = Tensor::new(&[time as f32], device)?.to_dtype(dtype)?;
+                let e = embed.forward(&t)?;
+                sum = Some(match sum {
+                    Some(acc) => (acc + e)?,
+                    None => e,
+                });
+            }
+            let t_combined = (sum.expect("num_time_conds > 0") / self.num_time_conds as f64)?;
             embeddings.push(t_combined);
         }
-        // stack of [1, 512] -> [num_steps, 1, 512]
-        // squeeze(1) -> [num_steps, 512]
+        // stack of [1, C] -> [num_steps, 1, C] -> [num_steps, C]
         Tensor::stack(&embeddings, 0)?.squeeze(1)
     }
 

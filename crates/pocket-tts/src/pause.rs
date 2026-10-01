@@ -72,6 +72,32 @@ pub fn parse_explicit_pauses(text: &str) -> Vec<PauseMarker> {
         .collect()
 }
 
+/// A piece of text to speak, or an explicit pause.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TextSegment {
+    Text(String),
+    Pause(u32),
+}
+
+/// Splits `text` on explicit `[pause:...]` markers only. Punctuation is left
+/// to the model, which was trained on whole sentences.
+pub fn split_explicit_pauses(text: &str) -> Vec<TextSegment> {
+    let mut segments = Vec::new();
+    let mut last = 0;
+    for marker in parse_explicit_pauses(text) {
+        let before = &text[last..marker.position];
+        if !before.trim().is_empty() {
+            segments.push(TextSegment::Text(before.to_string()));
+        }
+        segments.push(TextSegment::Pause(marker.duration_ms));
+        last = marker.position + marker.original.len();
+    }
+    if !text[last..].trim().is_empty() {
+        segments.push(TextSegment::Text(text[last..].to_string()));
+    }
+    segments
+}
+
 /// Parse natural pauses from punctuation
 pub fn parse_natural_pauses(text: &str) -> Vec<PauseMarker> {
     let mut pauses = Vec::new();

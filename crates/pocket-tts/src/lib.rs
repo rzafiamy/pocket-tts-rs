@@ -5,8 +5,10 @@ pub mod models;
 pub mod modules;
 pub mod pause;
 pub mod quantize;
+pub mod text_chunking;
 pub mod tts_model;
 pub mod voice_state;
+pub mod voices;
 pub mod weights;
 
 #[cfg(target_arch = "wasm32")]

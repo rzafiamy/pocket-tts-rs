@@ -281,10 +281,16 @@ pub struct ConvDownsample1d {
 }
 
 impl ConvDownsample1d {
-    pub fn new(stride: usize, dimension: usize, name: &str, vb: VarBuilder) -> Result<Self> {
+    pub fn new(
+        stride: usize,
+        dimension: usize,
+        out_dimension: usize,
+        name: &str,
+        vb: VarBuilder,
+    ) -> Result<Self> {
         let conv = StreamingConv1d::new(
             dimension,
-            dimension,
+            out_dimension,
             2 * stride,
             stride,
             1,
@@ -317,9 +323,15 @@ pub struct ConvTrUpsample1d {
 }
 
 impl ConvTrUpsample1d {
-    pub fn new(stride: usize, dimension: usize, name: &str, vb: VarBuilder) -> Result<Self> {
+    pub fn new(
+        stride: usize,
+        dimension: usize,
+        in_dimension: usize,
+        name: &str,
+        vb: VarBuilder,
+    ) -> Result<Self> {
         let convtr = StreamingConvTranspose1d::new(
-            dimension,
+            in_dimension,
             dimension,
             2 * stride,
             stride,
