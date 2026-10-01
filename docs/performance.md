@@ -46,7 +46,7 @@ default and matters: `CUDA_MODULE_LOADING=EAGER` raises the peak to 924 MiB.
 Output at temperature 0 matches the Python reference (corr 1.00000); WER on
 the French and English sets is 3.4% and 3.2%.
 
-### Threads
+## CPU threads
 
 Every op is small at batch 1, so threads mostly add synchronization:
 1 to 4 threads give the same speed, 16 threads lose ~2x, 32 lose more.
