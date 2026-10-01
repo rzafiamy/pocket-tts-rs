@@ -196,7 +196,20 @@ impl TTSModel {
                 .weights_path
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("weights_path not specified in config"))?;
-            let weights_file = crate::weights::download_if_necessary(weights_path)?;
+            // The voice-cloning repo is gated; like the Python reference, fall
+            // back to the ungated weights (predefined voices only) on failure.
+            let weights_file = match crate::weights::download_if_necessary(weights_path) {
+                Ok(f) => f,
+                Err(e) => match &config.weights_path_without_voice_cloning {
+                    Some(fallback) => {
+                        tracing::warn!(
+                            "voice-cloning weights unavailable ({e}); using weights without voice cloning"
+                        );
+                        crate::weights::download_if_necessary(fallback)?
+                    }
+                    None => return Err(e),
+                },
+            };
 
             // Load safetensors with VarBuilder
             let vb =

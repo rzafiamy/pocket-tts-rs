@@ -37,10 +37,13 @@ pub fn download_if_necessary(file_path: &str) -> Result<PathBuf> {
             (filename_with_revision, None)
         };
 
-        // Use ApiBuilder to support HF_TOKEN from environment
-        let token = std::env::var("HF_TOKEN").ok();
-
-        let api = ApiBuilder::new().with_token(token).build()?;
+        // HF_TOKEN overrides the token cached by `hf auth login`; passing
+        // None unconditionally would discard the cached one.
+        let mut builder = ApiBuilder::new();
+        if let Ok(token) = std::env::var("HF_TOKEN") {
+            builder = builder.with_token(Some(token));
+        }
+        let api = builder.build()?;
 
         // Create repo with or without revision
         let repo = if let Some(rev) = revision {
