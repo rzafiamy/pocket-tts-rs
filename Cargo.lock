@@ -2615,6 +2615,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "thiserror 2.0.18",
+ "tn",
  "tokenizers 0.21.4",
  "tracing",
 ]
@@ -3618,6 +3619,14 @@ checksum = "be4d6b5f19ff7664e8c98d03e2139cb510db9b0a60b55f8e8709b689d939b6bc"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "tn"
+version = "0.1.0"
+source = "git+https://github.com/rzafiamy/tn-rs?tag=v0.1.0#47f3be4b0c2bbb68c02036c522762aea7f4768ad"
+dependencies = [
+ "regex",
 ]
 
 [[package]]

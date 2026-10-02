@@ -33,8 +33,10 @@ Core (must work, covered by tests — see [spec/matrix.md](spec/matrix.md)):
   abbreviations (`Mme`, `Dr.`) are spelled out in French and English, and
   chat-style Markdown (headings, lists, `**bold**`, tables, links, emoji)
   becomes plain sentences — the model was trained on spelled-out text and
-  turns digits into noise (`crates/pocket-tts/src/normalize.rs`;
-  `--no-normalize` to disable).
+  turns digits into noise. The rules live in the
+  [`tn`](https://github.com/rzafiamy/tn-rs) crate, shared with zallama's
+  other TTS engines (`crates/pocket-tts/src/normalize.rs`; `--no-normalize`
+  to disable).
 - **Voices**: 27 predefined voices per language with a native default
   (`estelle` for French, `alba` for English) — `crates/pocket-tts/src/voices.rs`.
 - **GGUF**: `pocket-tts convert` writes weights, config, tokenizer and voices

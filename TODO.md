@@ -27,13 +27,9 @@ Next steps after v0.7.0, in priority order. Measurements behind them:
 
 ## Quality and coverage
 
-- [ ] **Stronger text normalization.** `normalize.rs` covers the common
-  French/English cases with regexes. Next: a grammar-based normalizer in the
-  spirit of NVIDIA NeMo text processing (WFST classify/verbalize: dates,
-  measures, money, addresses, roman numerals, context-dependent readings),
-  ported to Rust, plus a pronunciation dictionary for recent words, names
-  and brands the model has not seen (word → respelling, user-editable).
-  German, Italian, Spanish, Portuguese and Dutch rules.
+- [ ] **Stronger text normalization**: now developed in
+  [tn-rs](https://github.com/rzafiamy/tn-rs) (lexicon done; Roman numerals,
+  more languages and grammar-based classification in its TODO.md).
 - [ ] Quality evaluation (WER) of German, Italian, Spanish, Portuguese,
   Dutch; parity matrix for the 24-layer French model.
 - [ ] Measure the Metal build (speed, parity) and CUDA on Windows.

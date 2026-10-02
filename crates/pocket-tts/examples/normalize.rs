@@ -1,7 +1,7 @@
 //! Prints `text` as normalized before synthesis (`normalize.rs`).
 //! Usage: cargo run --release --example normalize -- [--safe] <variant|fr|en> <text>
 //! `--safe` leaves ambiguous numbers as digits (`normalize_safe`).
-use pocket_tts::normalize::{Lang, normalize, normalize_safe};
+use pocket_tts::normalize::{Lang, lang_of_variant, normalize, normalize_safe};
 
 fn main() {
     let mut args: Vec<String> = std::env::args().collect();
@@ -12,7 +12,7 @@ fn main() {
     let lang = match args.get(1).map(String::as_str) {
         Some("fr") => Lang::Fr,
         Some("en") => Lang::En,
-        Some(v) => Lang::of_variant(v),
+        Some(v) => lang_of_variant(v),
         None => Lang::En,
     };
     let text = args[2..].join(" ");

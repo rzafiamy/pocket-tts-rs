@@ -18,6 +18,13 @@ versions: [SemVer](https://semver.org/).
   leaves ambiguous numbers (codes, phone chains, parenthesized groups) as
   digits for a language model to read; `normalize` example prints either.
 
+### Changed
+- The normalization rules moved to the `tn` crate
+  ([rzafiamy/tn-rs](https://github.com/rzafiamy/tn-rs) v0.1.0), shared
+  with zallama's other TTS engines; `pocket_tts::normalize` re-exports it
+  and adds `lang_of_variant`. New in `tn`: `de un` → `d'un` elision,
+  pronunciation lexicon (`normalize_text`).
+
 ### Fixed
 - French ordinals of numbers ending in `s`: `3e` read "troiième".
 

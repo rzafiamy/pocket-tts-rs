@@ -615,7 +615,7 @@ impl TTSModel {
     pub fn split_into_best_sentences(&self, text: &str) -> Result<Vec<String>> {
         let text = crate::pause::strip_pause_markers(text);
         let text = if self.normalize_text {
-            crate::normalize::normalize(&text, crate::normalize::Lang::of_variant(&self.variant))
+            crate::normalize::normalize(&text, crate::normalize::lang_of_variant(&self.variant))
         } else {
             text
         };
