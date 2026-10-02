@@ -13,6 +13,13 @@ versions: [SemVer](https://semver.org/).
   headings, lists, emphasis, tables, code blocks, links and emoji become plain
   sentences, one per line. Digits were read as noise ("9h30", "1 250 000 €"),
   which ruined long chat answers.
+- Dates (`21/10/2026` in French, `10/21/2026` in English), spacing of
+  numbers glued to letters (`221B`, `Q2`), and `normalize_safe`, which
+  leaves ambiguous numbers (codes, phone chains, parenthesized groups) as
+  digits for a language model to read; `normalize` example prints either.
+
+### Fixed
+- French ordinals of numbers ending in `s`: `3e` read "troiième".
 
 ### Added
 - Release workflow: prebuilt binaries for Linux x86_64/aarch64, Windows

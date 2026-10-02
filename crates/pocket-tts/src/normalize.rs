@@ -34,15 +34,61 @@ impl Lang {
     }
 }
 
-/// Normalizes `text` for synthesis in `lang`.
+/// Normalizes `text` for synthesis in `lang`: every number is spelled out,
+/// ambiguous ones (codes like `221B`, phone chains) on a best-effort basis.
 pub fn normalize(text: &str, lang: Lang) -> String {
+    run(text, lang, false)
+}
+
+/// Like [`normalize`], but numbers whose reading the rules cannot be sure of
+/// stay as digits: glued to letters (`221B`, `Q2`, `A380`), in digit chains
+/// joined by `/`, `-` or `.` (`1-800-555-0199`, `3.11.2`), or in parentheses
+/// (`(555)`). Meant to run before a language model that handles those, so the
+/// model never sees, and never rewrites, the amounts the rules got right.
+pub fn normalize_safe(text: &str, lang: Lang) -> String {
+    run(text, lang, true)
+}
+
+fn run(text: &str, lang: Lang, safe: bool) -> String {
     let text = markdown_to_sentences(text);
     let text = match lang {
-        Lang::Fr => french(&text),
-        Lang::En => english(&text),
+        Lang::Fr => french(&text, safe),
+        Lang::En => english(&text, safe),
         Lang::Other => text,
     };
     SPACES.replace_all(text.trim(), " ").into_owned()
+}
+
+/// How a bare number sits in `hay` (its digits span `start..end`).
+enum Context {
+    Plain,
+    /// Glued to a letter: `221B`, `Q2`.
+    Glued {
+        before: bool,
+        after: bool,
+    },
+    /// Part of a digit chain or in parentheses: phone numbers, versions.
+    Chain,
+}
+
+fn context(hay: &str, start: usize, end: usize) -> Context {
+    let before: Vec<char> = hay[..start].chars().rev().take(2).collect();
+    let after: Vec<char> = hay[end..].chars().take(2).collect();
+    let (p, pp) = (before.first().copied(), before.get(1).copied());
+    let (n, nn) = (after.first().copied(), after.get(1).copied());
+    let joiner = |c: Option<char>| matches!(c, Some('/' | '-' | '.' | '–'));
+    let digit = |c: Option<char>| c.is_some_and(|c| c.is_ascii_digit());
+    if (joiner(p) && digit(pp)) || (joiner(n) && digit(nn)) || (p == Some('(') && n == Some(')')) {
+        return Context::Chain;
+    }
+    let letter = |c: Option<char>| c.is_some_and(char::is_alphabetic);
+    if letter(p) || letter(n) {
+        return Context::Glued {
+            before: letter(p),
+            after: letter(n),
+        };
+    }
+    Context::Plain
 }
 
 // ---------------------------------------------------------------------------
@@ -280,7 +326,11 @@ fn fr_ordinal(n: u64, feminine: bool) -> String {
         return if feminine { "première" } else { "premier" }.to_string();
     }
     let card = fr_cardinal(n);
-    let card = card.strip_suffix('s').unwrap_or(&card).to_string(); // cents, vingts
+    // "deux cents" -> "deux centième", "quatre-vingts" -> "quatre-vingtième"
+    let card = match card.strip_suffix('s') {
+        Some(h) if h.ends_with("cent") || h.ends_with("vingt") => h.to_string(),
+        _ => card,
+    };
     if let Some(h) = card.strip_suffix("cinq") {
         format!("{h}cinquième")
     } else if let Some(h) = card.strip_suffix("neuf") {
@@ -383,7 +433,7 @@ static FR_PERCENT_DEGREE_UNIT: LazyLock<Regex> = LazyLock::new(|| {
 static FR_NUMBER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(&format!(r"(^|[\s(])?(-)?({FR_NUM})")).unwrap());
 
-fn french(text: &str) -> String {
+fn french(text: &str, safe: bool) -> String {
     let mut s = text.to_string();
     for (re, rep) in FR_ABBR.iter() {
         s = re.replace_all(&s, *rep).into_owned();
@@ -492,8 +542,34 @@ fn french(text: &str) -> String {
             format!("{lead}{minus}{words} {unit}")
         })
         .into_owned();
-    s = FR_NUMBER
+    s = FR_DATE
         .replace_all(&s, |c: &Captures| {
+            let d: u64 = c[1].parse().unwrap_or(0);
+            let m: usize = c[2].parse().unwrap_or(0);
+            if !(1..=31).contains(&d) || !(1..=12).contains(&m) {
+                return c[0].to_string();
+            }
+            let day = if d == 1 {
+                "premier".to_string()
+            } else {
+                fr_cardinal(d)
+            };
+            let mut out = format!("{day} {}", FR_MONTHS[m - 1]);
+            if let Some(y) = c.get(3) {
+                out.push(' ');
+                out.push_str(&fr_cardinal(full_year(y.as_str())));
+            }
+            out
+        })
+        .into_owned();
+    let hay = s.clone();
+    s = FR_NUMBER
+        .replace_all(&hay, |c: &Captures| {
+            let g = c.get(3).unwrap();
+            let ctx = context(&hay, g.start(), g.end());
+            if safe && !matches!(ctx, Context::Plain) {
+                return c[0].to_string();
+            }
             let lead = c.get(1).map_or("", |m| m.as_str());
             // a minus sign only at a word start ("-5", "(-3"), not "Covid-19"
             let minus =
@@ -505,11 +581,67 @@ fn french(text: &str) -> String {
                     ""
                 };
             let num = Num::parse(&c[3], &FR_SEP, ',');
-            format!("{lead}{minus}{}", fr_number(&num))
+            spaced(&ctx, format!("{lead}{minus}{}", fr_number(&num)))
         })
         .into_owned();
     s
 }
+
+/// Separates spelled-out digits from the letters they were glued to
+/// ("221B" -> "... one B", "Q2" -> "Q two").
+fn spaced(ctx: &Context, words: String) -> String {
+    match ctx {
+        Context::Glued { before, after } => format!(
+            "{}{words}{}",
+            if *before { " " } else { "" },
+            if *after { " " } else { "" }
+        ),
+        _ => words,
+    }
+}
+
+/// "26" -> 2026, "1999" -> 1999.
+fn full_year(y: &str) -> u64 {
+    let v: u64 = y.parse().unwrap_or(0);
+    if y.len() == 2 { 2000 + v } else { v }
+}
+
+const FR_MONTHS: [&str; 12] = [
+    "janvier",
+    "février",
+    "mars",
+    "avril",
+    "mai",
+    "juin",
+    "juillet",
+    "août",
+    "septembre",
+    "octobre",
+    "novembre",
+    "décembre",
+];
+const EN_MONTHS: [&str; 12] = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+];
+
+/// dd/mm[/yyyy] (French order).
+static FR_DATE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b([0-9]{1,2})/([0-9]{1,2})(?:/([0-9]{4}|[0-9]{2}))?\b").unwrap()
+});
+/// mm/dd/yyyy (US order); a year is required, "3/4" stays ambiguous.
+static EN_DATE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b([0-9]{1,2})/([0-9]{1,2})/([0-9]{4}|[0-9]{2})\b").unwrap());
 
 fn plural_fr(word: &str, plural: bool) -> String {
     if plural {
@@ -701,7 +833,7 @@ static EN_PERCENT_DEGREE_UNIT: LazyLock<Regex> = LazyLock::new(|| {
 static EN_NUMBER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(&format!(r"(^|[\s(])?(-)?({EN_NUM})")).unwrap());
 
-fn english(text: &str) -> String {
+fn english(text: &str, safe: bool) -> String {
     let mut s = text.to_string();
     for (re, rep) in EN_ABBR.iter() {
         s = re.replace_all(&s, *rep).into_owned();
@@ -809,8 +941,36 @@ fn english(text: &str) -> String {
             format!("{lead}{minus}{words} {unit}")
         })
         .into_owned();
-    s = EN_NUMBER
+    s = EN_DATE
         .replace_all(&s, |c: &Captures| {
+            let m: usize = c[1].parse().unwrap_or(0);
+            let d: u64 = c[2].parse().unwrap_or(0);
+            if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+                return c[0].to_string();
+            }
+            let y = full_year(&c[3]);
+            format!(
+                "{} {}, {}",
+                EN_MONTHS[m - 1],
+                en_ordinal(d),
+                en_number(
+                    &Num {
+                        int: y.to_string(),
+                        dec: None
+                    },
+                    true
+                )
+            )
+        })
+        .into_owned();
+    let hay = s.clone();
+    s = EN_NUMBER
+        .replace_all(&hay, |c: &Captures| {
+            let g = c.get(3).unwrap();
+            let ctx = context(&hay, g.start(), g.end());
+            if safe && !matches!(ctx, Context::Plain) {
+                return c[0].to_string();
+            }
             let lead = c.get(1).map_or("", |m| m.as_str());
             let minus =
                 if c.get(2).is_some() && (c.get(1).is_some() || c.get(0).unwrap().start() == 0) {
@@ -821,7 +981,7 @@ fn english(text: &str) -> String {
                     ""
                 };
             let num = Num::parse(&c[3], &EN_SEP, '.');
-            format!("{lead}{minus}{}", en_number(&num, true))
+            spaced(&ctx, format!("{lead}{minus}{}", en_number(&num, true)))
         })
         .into_owned();
     s
@@ -909,6 +1069,10 @@ mod tests {
             "Le premier mai, la deuxième fois, le vingt et unième siècle."
         );
         assert_eq!(
+            fr("Au 3e étage, le 80e, le 200e, le 9e, le 5e."),
+            "Au troisième étage, le quatre-vingtième, le deux centième, le neuvième, le cinquième."
+        );
+        assert_eq!(
             fr("Appelez le 06 12 34 56 78."),
             "Appelez le zéro six douze trente-quatre cinquante-six soixante-dix-huit."
         );
@@ -952,6 +1116,42 @@ mod tests {
         assert_eq!(
             en("Dr. Smith & Mr. Jones."),
             "Doctor Smith and Mister Jones."
+        );
+    }
+
+    /// covers: REQ-TXT-003
+    #[test]
+    fn dates_and_glued_numbers() {
+        assert_eq!(
+            fr("Avant le 21/10/2026, le 1/5."),
+            "Avant le vingt et un octobre deux mille vingt-six, le premier mai."
+        );
+        assert_eq!(
+            en("On 10/21/2026 at gate 12B, Q2."),
+            "On October twenty-first, twenty twenty-six at gate twelve B, Q two."
+        );
+        assert_eq!(
+            en("Lives at 221B Baker St."),
+            "Lives at two hundred twenty-one B Baker St."
+        );
+    }
+
+    /// covers: REQ-TXT-003
+    #[test]
+    fn safe_mode_leaves_ambiguous_numbers() {
+        assert_eq!(
+            normalize_safe(
+                "Call (555) 123-4567 or 1-800-555-0199 about the 221B flat, $5.50 at 9:30 am.",
+                Lang::En
+            ),
+            "Call (555) 123-4567 or 1-800-555-0199 about the 221B flat, five dollars and fifty cents at nine thirty a m."
+        );
+        assert_eq!(
+            normalize_safe(
+                "L'A380 coûte 12,99 € le 21/10/2026, version 3.11.",
+                Lang::Fr
+            ),
+            "L'A380 coûte douze euros quatre-vingt-dix-neuf le vingt et un octobre deux mille vingt-six, version 3.11."
         );
     }
 
