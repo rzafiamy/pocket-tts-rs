@@ -846,6 +846,7 @@ mod tests {
         normalize(s, Lang::En)
     }
 
+    /// covers: REQ-TXT-003
     #[test]
     fn french_cardinals() {
         let cases = [
@@ -880,6 +881,7 @@ mod tests {
         }
     }
 
+    /// covers: REQ-TXT-003
     #[test]
     fn french_text() {
         assert_eq!(
@@ -924,6 +926,7 @@ mod tests {
         );
     }
 
+    /// covers: REQ-TXT-003
     #[test]
     fn english_text() {
         assert_eq!(en("Meet at 9:30 am."), "Meet at nine thirty a m.");
@@ -952,6 +955,7 @@ mod tests {
         );
     }
 
+    /// covers: REQ-TXT-003
     #[test]
     fn markdown() {
         let md = "## Votre semaine\n\nVoici :\n\n1. **Réunion** lundi\n- *Livraison* jeudi 🚚\n---\n| Jour | Lieu |\n|---|---|\n| Lundi | Paris |\n```\ncode\n```\nVoir [le site](https://x.fr).";
@@ -961,6 +965,7 @@ mod tests {
         );
     }
 
+    /// covers: REQ-TXT-003
     #[test]
     fn plain_text_unchanged() {
         let s = "Bonjour, je vous appelle pour le rendez-vous de demain matin.";
