@@ -27,6 +27,6 @@ Next steps after v0.7.0, in priority order. Measurements behind them:
 
 - [ ] Quality evaluation (WER) of German, Italian, Spanish, Portuguese,
   Dutch; parity matrix for the 24-layer French model.
-- [ ] Test the Metal build.
+- [ ] Measure the Metal build (speed, parity) and CUDA on Windows.
 - [ ] Report the candle 0.11 bugs upstream (grouped `conv_transpose1d`
   speed and batch > 1 results; stride-0 batch `matmul`).

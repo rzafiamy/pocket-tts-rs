@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# build.sh — builds the release `pocket-tts` binary into build/.
+# build.sh — builds the release `pocket-tts` binary into
+# build/pocket-tts-<os>-<arch>-<backend>-<version>[.exe]
+# (Linux, macOS, Windows through Git Bash/MSYS2; x86_64 or aarch64).
 #
 #   ./build.sh            CPU
 #   ./build.sh --cuda     NVIDIA GPU (needs nvcc; CUDA_COMPUTE_CAP=89 for an RTX 40xx, 80 A100, 90 H100)
@@ -26,8 +28,15 @@ case "${1:-}" in
 esac
 VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
 cargo build --release --locked -p pocket-tts-cli --target-dir "$TARGET_DIR" "${FEATURES[@]}"
+case "$(uname -s)" in
+  Linux) OS=linux; EXE= ;;
+  Darwin) OS=macos; EXE= ;;
+  MINGW*|MSYS*|CYGWIN*) OS=windows; EXE=.exe ;;
+  *) OS=$(uname -s | tr '[:upper:]' '[:lower:]'); EXE= ;;
+esac
+ARCH=$(uname -m); [ "$ARCH" = arm64 ] && ARCH=aarch64
 mkdir -p build
-OUT="build/pocket-tts-$(uname -s | tr '[:upper:]' '[:lower:]')-$SUFFIX-$VERSION"
-cp "$TARGET_DIR/release/pocket-tts" "$OUT"
+OUT="build/pocket-tts-$OS-$ARCH-$SUFFIX-$VERSION$EXE"
+cp "$TARGET_DIR/release/pocket-tts$EXE" "$OUT"
 "$OUT" --version
 echo "artifact: $OUT"

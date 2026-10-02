@@ -1,98 +1,23 @@
-# Byte-compiled / optimized / DLL files
-__pycache__
-*.py[cod]
-*$py.class
-
-# C extensions
-*.so
-
-# macOS dir files
-.DS_Store
-
-# Distribution / packaging
-.Python
-/env/
-/build/
-develop-eggs/
-/dist/
-downloads/
-eggs/
-.eggs/
-/lib/
-/lib64/
-parts/
-sdist/
-/var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-.ipynb_checkpoints
-
-# Tests and linter
-.pytest_cache/
-.mypy_cache/
-.coverage
-coverage.json
-
-# docs
-/api_docs
-
-# dotenv
-.env
-.envrc
-
-# virtualenv
-.venv
-venv/
-ENV/
-
-# egs with manifest files
-egs/*
-!egs/example
-# local datasets
-dataset/*
-!dataset/example
-
-# personal notebooks & scripts
-*/local_scripts
-*/notes
-.vscode/
-/notebooks
-/local_scripts
-/notes
-
-# cython output
-/audiocraft/metrics/abx/*.c
-
-# Rust
-target/
+# Rust build outputs
+/target/
+/target-*/
 **/target/
-docs/book/
-docs/build/
+/build/
 
-# Audio / Models
-/weights
-test_en_audio_4000.model
-profile_output*
-# Generally ignore large model/audio files but allow those in assets/
+# Models and generated audio (reference fixtures in assets/ and demos in portfolio/ are kept)
+/models/
+*.gguf
 *.safetensors
 *.wav
-*.model
-*.pt
 !/assets/*.wav
+!/assets/*.safetensors
 !/portfolio/*.wav
-!/assets/ref_voice_conditioning.safetensors
-!/assets/ref_decoder_intermediates.safetensors
-!/assets/ref_mimi_input.safetensors
-!/crates/pocket-tts/config/*.yaml
 
-# Agents files, use a symlink to AGENTS.md instead. 
-CLAUDE.md
-QWEN.md
-.claude/
-temp-candle/.venv-parity/
-/models/
+# Python helpers (scripts/parity, scripts/eval)
+__pycache__/
+*.py[cod]
+.venv/
+.venv-parity/
 
 # Secrets
 .env
@@ -101,20 +26,28 @@ temp-candle/.venv-parity/
 *.key
 *.p12
 
-# OS / editors
-Thumbs.db
-.idea/
-
-# Build outputs
-/build/
-/target-cuda/
+# Release packages
 *.app
 *.deb
 *.AppImage
 *.dmg
 *.msi
+*.zip
+*.tar.gz
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Agent files (AGENTS.md is the shared one)
+CLAUDE.md
+QWEN.md
+.claude/
 
 # Logs / temporary files
 *.log
 tmp/
 .cache/
+profile_output*

@@ -3,6 +3,28 @@
 Notable changes of pocket-tts-rs. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versions: [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Release workflow: prebuilt binaries for Linux x86_64/aarch64, Windows
+  x86_64 and macOS aarch64 (Metal) attached to each GitHub release.
+- Platform matrix in the README.
+- Copyright notices (Kyutai, pocket-tts-rs contributors) in `LICENSE`.
+
+### Changed
+- `build.sh` names artifacts `pocket-tts-<os>-<arch>-<backend>-<version>`
+  (`.exe` on Windows).
+- CI runs clippy and tests on Linux, Windows and macOS (Metal) without the
+  removed web UI build; no more macOS-only compiler flags.
+- License is MIT only, matching `LICENSE` and the Kyutai original (the
+  Apache-2.0 alternative was declared without its license text).
+
+### Removed
+- Docker image, crates.io publish workflow, Codex agent skills and plans,
+  dead examples (`check_config`, `inspect_hound`, `scaling_bench`,
+  `bench_sdpa`, `verify_sdpa`, `cudactx`, `wasm`), unused `assets/ref_v2.wav`.
+- `target-cuda/` build outputs that had been committed.
+
 ## [0.7.0] - 2026-10-02
 
 First release of this fork (rzafiamy/pocket-tts-rs).

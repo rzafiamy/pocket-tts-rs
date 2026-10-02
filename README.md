@@ -4,6 +4,7 @@
 ([Candle](https://github.com/huggingface/candle)): one native binary, one
 GGUF model file, English and French speech (and the other upstream
 languages) faster than the Python reference on CPU and 28× real time on GPU.
+Runs on Linux, macOS and Windows, on CPU, NVIDIA (CUDA) or Apple (Metal) GPUs.
 
 Forked from [babybirdprd/pocket-tts](https://github.com/babybirdprd/pocket-tts)
 (Candle port, February 2026) and brought up to upstream `41cbc84`
@@ -34,7 +35,8 @@ Core (must work, covered by tests — see [spec/matrix.md](spec/matrix.md)):
   (`crates/pocket-tts/src/gguf.rs`, `crates/pocket-tts/src/modules/linear.rs`).
 - **Fast CPU path**: im2col convolutions, matmul transposed convolutions,
   exp-based GELU, copy-free attention (`crates/pocket-tts/src/modules/`).
-- **CUDA** (`--features cuda`, `--device cuda`) and Metal (`--features metal`, untested).
+- **Backends**: CPU everywhere, CUDA (`--features cuda`, `--device cuda`),
+  Metal (`--features metal`, `--device metal`) — see [Platforms](#platforms).
 - **Streaming**: audio comes out frame by frame (80 ms); `--stream` writes PCM to stdout.
 - **HTTP server** with an OpenAI-compatible `/v1/audio/speech`
   (`crates/pocket-tts-cli/src/server/`).
@@ -44,11 +46,30 @@ Secondary (optional):
 - **Voice cloning** from a WAV file (needs the gated weights, see below).
 - **Explicit pauses**: `[pause:500ms]`, `[pause:1s]` (`crates/pocket-tts/src/pause.rs`).
 
+## Platforms
+
+| OS | Architectures | Backends | Status |
+|---|---|---|---|
+| Linux | x86_64, aarch64 | CPU, CUDA | measured on x86_64 (i9-14900K, RTX 4090) |
+| Windows | x86_64 | CPU, CUDA | CPU covered by CI; CUDA not tried |
+| macOS | aarch64 (Apple Silicon), x86_64 | CPU, Metal | CPU covered by CI; Metal compiles, not measured |
+
+Prebuilt CPU binaries (Linux x86_64/aarch64, Windows x86_64) and a macOS
+Metal binary are attached to each [GitHub release](https://github.com/rzafiamy/pocket-tts-rs/releases).
+CUDA binaries depend on the CUDA version and GPU, so build them locally
+(`./build.sh --cuda`).
+
+Local builds use `-C target-cpu=native` (`.cargo/config.toml`): the binary
+is fast on the build machine but may not start on an older CPU. Release
+binaries target `x86-64-v3` (AVX2, 2015+) and `apple-m1`.
+
 ## Installation
 
 ### Prerequisites
 
-- Linux, macOS or Windows; a C/C++ compiler, `pkg-config`, OpenSSL headers, git, curl.
+- A C/C++ compiler, `pkg-config`, OpenSSL headers, git, curl
+  (Linux: `build-essential`; macOS: Xcode Command Line Tools; Windows:
+  Visual Studio Build Tools and Git Bash to run the scripts).
 - Rust 1.97.1 (pinned in `rust-toolchain.toml`, installed by rustup).
 - NVIDIA GPU: CUDA Toolkit ≥ 12 (`nvcc`). Apple GPU: Xcode.
 - Optional: Python 3 for the parity and quality scripts.
@@ -60,16 +81,17 @@ when missing (`CHECK_ONLY=1 ./prereq.sh` only checks).
 
 ```bash
 ./setup.sh            # prerequisites, cargo fetch, cargo check   (--cuda for GPU)
-./build.sh            # release binary in build/pocket-tts-<os>-cpu-<version>
-./build.sh --cuda     # build/pocket-tts-<os>-cuda-<version>
+./build.sh            # build/pocket-tts-<os>-<arch>-cpu-<version>
+./build.sh --cuda     # build/pocket-tts-<os>-<arch>-cuda-<version>
+./build.sh --metal    # build/pocket-tts-macos-aarch64-metal-<version>
 ```
 
 ### Check the installation
 
 ```bash
-build/pocket-tts-linux-cpu-0.7.0 --version
-build/pocket-tts-linux-cpu-0.7.0 generate --variant french -t "Bonjour." -o bonjour.wav
-tests/e2e.sh build/pocket-tts-linux-cpu-0.7.0     # convert + generate + serve
+build/pocket-tts-linux-x86_64-cpu-0.7.0 --version
+build/pocket-tts-linux-x86_64-cpu-0.7.0 generate --variant french -t "Bonjour." -o bonjour.wav
+tests/e2e.sh build/pocket-tts-linux-x86_64-cpu-0.7.0     # convert + generate + serve
 ```
 
 ### Model access
@@ -98,6 +120,7 @@ pocket-tts info -m french-q8_0.gguf                        # check a model/confi
 
 # GPU
 pocket-tts generate -m french-q8_0.gguf --device cuda -t "Bonjour." -o out.wav
+pocket-tts generate -m french-q8_0.gguf --device metal -t "Bonjour." -o out.wav
 
 # Serve
 pocket-tts serve -m french-q8_0.gguf --port 8000
@@ -106,14 +129,14 @@ curl -s localhost:8000/v1/audio/speech -H 'content-type: application/json' \
 ```
 
 More: [docs/generate.md](docs/generate.md), [docs/serve.md](docs/serve.md),
-[docs/rust-api.md](docs/rust-api.md), [docs/docker.md](docs/docker.md).
+[docs/rust-api.md](docs/rust-api.md).
 
 ## Configuration
 
 **Location**: there is no configuration file. The only state on disk is
 the Hugging Face cache: `~/.cache/huggingface` on Linux and macOS,
 `%USERPROFILE%\.cache\huggingface` on Windows (override with `HF_HOME`);
-`.env` files are read by your shell or Docker, not by the binary. Everything is set by
+`.env` files are read by your shell, not by the binary. Everything is set by
 command-line options (`pocket-tts <command> --help`) or environment
 variables — template: [`pocket-tts.example.env`](pocket-tts.example.env),
 copy to `.env` or export. To change a setting, change the option or variable
@@ -174,8 +197,8 @@ Requirements, traceability and manual tests: [spec/](spec/specification.md).
   autoregressive loop amplifies it on long chunks (same length and EOS).
 - Do not pin the process to a few CPUs (`taskset`): one kernel thread pool
   spins and a frame then takes ~1 s.
-- Metal compiles but is untested; only English and French were evaluated
-  for quality.
+- Metal compiles but its speed and output are not measured; only English
+  and French were evaluated for quality.
 - Voice cloning needs the gated Hugging Face weights.
 - One request at a time per server (generation is serialized).
 
@@ -196,5 +219,5 @@ Details and context: [TODO.md](TODO.md).
 
 ## License
 
-Code: MIT OR Apache-2.0 (see [LICENSE](LICENSE)). Model weights: CC-BY-4.0
+Code: MIT (see [LICENSE](LICENSE)). Model weights: CC-BY-4.0
 (Kyutai) — credit Kyutai when distributing converted GGUF files.

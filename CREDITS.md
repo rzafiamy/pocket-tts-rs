@@ -1,6 +1,6 @@
 # Credits
 
-pocket-tts-rs is distributed under MIT OR Apache-2.0. It builds on the work
+pocket-tts-rs is distributed under MIT. It builds on the work
 below, each used under its own license. Versions are those of `Cargo.lock`.
 
 ## Authors

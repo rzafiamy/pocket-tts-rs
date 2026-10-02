@@ -58,6 +58,62 @@ french-q8_0.gguf` (zallama) or `pocket-tts generate -m ...`.
 | REQ-SRV-001 | HTTP server: `/health`, `/generate`, `/stream`, `/tts`, OpenAI `/v1/audio/speech`. | Must |
 | REQ-CLI-001 | `generate` writes a WAV (or PCM to stdout with `--stream`). | Must |
 
+## Technical specification
+
+### Architecture
+
+Two crates in one Cargo workspace:
+
+- `crates/pocket-tts` (library): model loading, text preparation,
+  generation loop, kernels.
+- `crates/pocket-tts-cli` (binary `pocket-tts`): commands `generate`,
+  `convert`, `info`, `serve`; shared model options in `loader.rs`; HTTP
+  server (axum) in `server/`.
+
+Pipeline per request: text → `text_chunking.rs` (≤ 50-token chunks) →
+FlowLM transformer (`models/flow_lm.rs`, `models/transformer.rs`) with the
+voice as a prefilled KV cache → sampler head (`modules/mlp.rs`: lsd,
+flow_matching or drifting) → one 32-dim latent per 80 ms frame → Mimi
+decoder (`models/mimi.rs`, `models/seanet.rs`) → 24 kHz PCM, streamed frame
+by frame.
+
+### Modules
+
+| Module | Role |
+|---|---|
+| `tts_model.rs` | Load (safetensors or GGUF), voice prompts, generation loop |
+| `builtin_configs.rs`, `config.rs` | Upstream YAML configs compiled in |
+| `gguf.rs`, `modules/linear.rs` | GGUF read/write, dense or `QMatMul` linears |
+| `modules/conv.rs`, `sdpa.rs`, `activations.rs` | CPU-critical kernels (im2col conv, matmul transposed conv, attention, GELU) |
+| `voices.rs`, `voice_state.rs` | Predefined voices, attention-state init and cloning |
+| `text_chunking.rs`, `pause.rs` | Text preparation, `[pause:…]` markers |
+
+### Data
+
+- **GGUF model file**: tensors (f32/f16/q8_0/q6k/q5k/q4k/q4_0), the model
+  config and tokenizer as metadata, voices as tensors. Self-sufficient.
+- **Hugging Face cache**: safetensors weights, tokenizer and voices when no
+  GGUF is given (`hf://` paths, `HF_HOME`).
+- No database, no configuration file; options and `POCKET_TTS_*`
+  environment variables only.
+
+### APIs and commands
+
+- CLI: `pocket-tts generate | convert | info | serve` (`--help` on each).
+- HTTP: `GET /health`, `POST /generate`, `POST /stream` (PCM),
+  `POST /tts` (multipart), `POST /v1/audio/speech` (OpenAI); details in
+  `docs/serve.md`.
+- Rust: `TTSModel::load`, `load_gguf`, `generate`, `generate_stream`
+  (`docs/rust-api.md`).
+
+### Platforms
+
+Linux (x86_64, aarch64), Windows (x86_64) and macOS (aarch64, x86_64).
+Backends selected at build time by Cargo features: CPU (default), `cuda`,
+`metal`, `mkl`; at run time by `--device`. Release binaries are built by
+`.github/workflows/release.yml` with portable CPU targets (`x86-64-v3`,
+`apple-m1`); local builds use `target-cpu=native`.
+
 ## Rules
 
 - Upstream is the reference: when the Python code changes behavior, the port
@@ -74,6 +130,6 @@ french-q8_0.gguf` (zallama) or `pocket-tts generate -m ...`.
   0.92 on a 3-chunk French text, same length and EOS).
 - Pinning the process to few CPUs (`taskset`) is very slow (see
   `docs/performance.md`).
-- Metal builds compile but are not tested.
+- Metal builds compile but are not measured; CUDA on Windows is untested.
 - Only English and French were evaluated for quality; other languages pass
   the parity matrix only for German.
