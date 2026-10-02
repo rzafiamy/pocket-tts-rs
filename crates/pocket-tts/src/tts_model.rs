@@ -47,6 +47,10 @@ pub struct TTSModel {
     /// End-of-sequence threshold
     pub eos_threshold: f32,
     pub noise_clamp: Option<f32>,
+    /// Spell out numbers, times, amounts, units and abbreviations and strip
+    /// Markdown before synthesis (`normalize.rs`); the model was trained on
+    /// spelled-out text. Number rules exist for French and English.
+    pub normalize_text: bool,
     /// Optional override for voice-conditioning Mimi chunk size (in frames).
     /// If `None`, an adaptive heuristic is used.
     pub voice_prompt_chunk_frames: Option<usize>,
@@ -408,6 +412,7 @@ impl TTSModel {
             eos_threshold,
             noise_clamp,
             voice_prompt_chunk_frames: None,
+            normalize_text: true,
             dim,
             ldim,
             device,
@@ -609,6 +614,11 @@ impl TTSModel {
     /// `split_into_best_sentences`), each at most `MAX_TOKENS_PER_CHUNK` tokens.
     pub fn split_into_best_sentences(&self, text: &str) -> Result<Vec<String>> {
         let text = crate::pause::strip_pause_markers(text);
+        let text = if self.normalize_text {
+            crate::normalize::normalize(&text, crate::normalize::Lang::of_variant(&self.variant))
+        } else {
+            text
+        };
         crate::text_chunking::split_into_best_sentences(
             &self.conditioner,
             &text,

@@ -28,6 +28,13 @@ Core (must work, covered by tests — see [spec/matrix.md](spec/matrix.md)):
 - **Upstream text handling**: character replacements, punctuation,
   capitalization, chunks of ≤ 50 tokens on sentence boundaries
   (`crates/pocket-tts/src/text_chunking.rs`).
+- **Text normalization** (not in upstream): numbers, times (`9h30`,
+  `9:30 am`), amounts (`1 250 000 €`, `$5.50`), `%`, `°C`, units, ordinals,
+  abbreviations (`Mme`, `Dr.`) are spelled out in French and English, and
+  chat-style Markdown (headings, lists, `**bold**`, tables, links, emoji)
+  becomes plain sentences — the model was trained on spelled-out text and
+  turns digits into noise (`crates/pocket-tts/src/normalize.rs`;
+  `--no-normalize` to disable).
 - **Voices**: 27 predefined voices per language with a native default
   (`estelle` for French, `alba` for English) — `crates/pocket-tts/src/voices.rs`.
 - **GGUF**: `pocket-tts convert` writes weights, config, tokenizer and voices

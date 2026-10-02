@@ -6,6 +6,15 @@ versions: [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Text normalization before synthesis (`normalize.rs`, on by default,
+  `--no-normalize` / `POCKET_TTS_NO_NORMALIZE=1` to disable): French and
+  English numbers, decimals, times, amounts, `%`, `°C`/`°F`, units, ordinals,
+  phone numbers, years (English) and abbreviations are spelled out; Markdown
+  headings, lists, emphasis, tables, code blocks, links and emoji become plain
+  sentences, one per line. Digits were read as noise ("9h30", "1 250 000 €"),
+  which ruined long chat answers.
+
+### Added
 - Release workflow: prebuilt binaries for Linux x86_64/aarch64, Windows
   x86_64 and macOS aarch64 (Metal) attached to each GitHub release.
 - Platform matrix in the README.

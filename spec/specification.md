@@ -43,6 +43,7 @@ french-q8_0.gguf` (zallama) or `pocket-tts generate -m ...`.
 |---|---|---|
 | REQ-CFG-001 | Every upstream config (languages, `_24l`, drifting, `b6369a24`) is built into the binary and selectable with `--variant`. | Must |
 | REQ-TXT-001 | Text preparation (replacements, punctuation, capitalization, padding, chunking into ≤ 50-token sentence groups) is identical to upstream `text_chunking.py`. | Must |
+| REQ-TXT-003 | Numbers, times, amounts, percentages, temperatures, units, ordinals and common abbreviations are spelled out in French and English, and Markdown becomes plain sentences, before synthesis (on by default, `--no-normalize`). Plain text without them is unchanged. | Must |
 | REQ-TXT-002 | `[pause:500ms]` / `[pause:1s]` markers insert exact silence; punctuation is left to the model. | Should |
 | REQ-VOI-001 | Predefined voices (upstream exported model states) load for each language; each language has a native default voice. | Must |
 | REQ-VOI-002 | A WAV file clones a voice (Mimi encoder, end-on-pause trimming, `bos_before_voice`). | Should |

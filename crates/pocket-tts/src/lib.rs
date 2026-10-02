@@ -5,6 +5,7 @@ pub mod config;
 pub mod gguf;
 pub mod models;
 pub mod modules;
+pub mod normalize;
 pub mod pause;
 pub mod text_chunking;
 pub mod tts_model;

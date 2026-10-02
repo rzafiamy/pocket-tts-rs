@@ -46,6 +46,11 @@ pub struct ModelArgs {
     /// Clamp sampling noise to [-x, x]
     #[arg(long)]
     pub noise_clamp: Option<f32>,
+
+    /// Do not spell out numbers, times, amounts and units or strip Markdown
+    /// before synthesis (French and English rules; on by default)
+    #[arg(long, env = "POCKET_TTS_NO_NORMALIZE")]
+    pub no_normalize: bool,
 }
 
 /// Sets the CPU thread count. Call before any tensor work.
@@ -94,6 +99,7 @@ impl ModelArgs {
         model.lsd_decode_steps = self.lsd_decode_steps;
         model.eos_threshold = self.eos_threshold;
         model.noise_clamp = self.noise_clamp;
+        model.normalize_text = !self.no_normalize;
         Ok(model)
     }
 

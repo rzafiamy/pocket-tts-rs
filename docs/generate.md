@@ -25,6 +25,7 @@ Without `--text`, a greeting in the model's language is spoken.
 | `--lsd-decode-steps` | Sampler steps (more is slower; 1 is what Kyutai ships) | `1` |
 | `--eos-threshold` | End-of-speech threshold (lower = longer) | `-4.0` |
 | `--noise-clamp` | Clamp sampling noise to ±x | off |
+| `--no-normalize`, `POCKET_TTS_NO_NORMALIZE` | Keep digits, symbols and Markdown as written (see `normalize.rs`) | normalization on |
 | `--frames-after-eos` | Frames kept after end of speech | model or length-based guess |
 | `--stream` | Raw 16-bit PCM to stdout | off |
 | `-q, --quiet` | Errors only | off |
