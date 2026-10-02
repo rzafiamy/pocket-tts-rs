@@ -9,6 +9,7 @@ are described in [manual-tests.md](manual-tests.md).
 | REQ-CFG-001 | Built-in configs | Variants | `crates/pocket-tts/src/builtin_configs.rs`, `tts_model.rs` | `builtin_configs_parse` | ✅ | 20 configs |
 | REQ-TXT-001 | Upstream text preparation | Text | `crates/pocket-tts/src/text_chunking.rs` | `terminal_punctuation`, `prepare_basic`, `prepare_padding_and_semicolons`, `prepare_replace_characters`, manual MT-01 | ✅ | chunk ids equal upstream |
 | REQ-TXT-003 | Text normalization (fr/en numbers, Markdown) | Text | `tn` crate ([rzafiamy/tn-rs](https://github.com/rzafiamy/tn-rs), its own tests and matrix), `crates/pocket-tts/src/normalize.rs`, `tts_model.rs` (`split_into_best_sentences`) | `variant_languages`, `model_languages_are_normalized` | ✅ | ASR on a 2.4k-char chat text: digits read correctly |
+| REQ-INF-003 | Tight pauses between chunks | Inference | `tts_model.rs` (`tightened`), `loader.rs` (`--tight-pauses`) | `chunk_silence_is_shortened_not_speech` | ✅ | chat answer: pauses ≥ 0.4 s 26 → 3, 9 s shorter |
 | REQ-TXT-002 | Explicit pauses | Pauses | `crates/pocket-tts/src/pause.rs`, `tts_model.rs` | `test_parse_explicit_pause_ms`, `test_strip_pause_markers`, `test_generate_with_pauses_adds_silence` | ✅ | |
 | REQ-VOI-001 | Predefined voices | Voices | `crates/pocket-tts/src/voices.rs`, `tts_model.rs` | `import_exported_model_state`, manual MT-01 | ✅ | |
 | REQ-VOI-002 | Voice cloning | Voices | `crates/pocket-tts/src/tts_model.rs`, `audio.rs` | `test_voice_cloning_from_ref_wav`, manual MT-01 | ✅ | needs gated weights |

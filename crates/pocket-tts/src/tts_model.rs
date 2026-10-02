@@ -51,6 +51,12 @@ pub struct TTSModel {
     /// Markdown before synthesis (`normalize.rs`); the model was trained on
     /// spelled-out text. Number rules exist for French and English.
     pub normalize_text: bool,
+    /// Shorten the silence each chunk ends with (and starts with): chunks
+    /// are generated as separate utterances, so a long sentence split at a
+    /// comma got a full end-of-sentence pause in its middle, heard as choppy
+    /// speech. Keeps 320 ms after a sentence end, 160 ms after a comma split.
+    /// Off by default (upstream behavior, parity tests); on in the CLI/server.
+    pub tighten_pauses: bool,
     /// Optional override for voice-conditioning Mimi chunk size (in frames).
     /// If `None`, an adaptive heuristic is used.
     pub voice_prompt_chunk_frames: Option<usize>,
@@ -413,6 +419,7 @@ impl TTSModel {
             noise_clamp,
             voice_prompt_chunk_frames: None,
             normalize_text: true,
+            tighten_pauses: false,
             dim,
             ldim,
             device,
@@ -690,11 +697,11 @@ impl TTSModel {
             Err(e) => return Box::new(std::iter::once(Err(e))),
         };
         let voice_state = voice_state.clone();
-        Box::new(
-            chunks
-                .into_iter()
-                .flat_map(move |chunk| self.generate_stream_segment(&chunk, &voice_state)),
-        )
+        let tighten = self.tighten_pauses;
+        Box::new(chunks.into_iter().flat_map(move |chunk| {
+            let frames = self.generate_stream_segment(&chunk, &voice_state);
+            tightened(frames, &chunk, tighten)
+        }))
     }
 
     /// Generate audio stream from text with voice state, returning an owned iterator.
@@ -711,11 +718,11 @@ impl TTSModel {
             Err(e) => return Box::new(std::iter::once(Err(e))),
         };
         let voice_state = voice_state.clone();
-        Box::new(
-            chunks
-                .into_iter()
-                .flat_map(move |chunk| model.generate_stream_segment(&chunk, &voice_state)),
-        )
+        let tighten = model.tighten_pauses;
+        Box::new(chunks.into_iter().flat_map(move |chunk| {
+            let frames = model.generate_stream_segment(&chunk, &voice_state);
+            tightened(frames, &chunk, tighten)
+        }))
     }
 
     /// Frames generated for `token_count` text tokens before giving up on EOS.
@@ -895,6 +902,73 @@ impl TTSModel {
     }
 }
 
+/// Frame RMS below which a frame counts as silence (about -42 dBFS).
+const SILENT_RMS: f32 = 0.008;
+/// Silent frames (80 ms each) kept at a chunk's end: after a sentence end,
+/// and after a split inside a sentence (at a comma).
+const PAUSE_FRAMES_SENTENCE: usize = 4;
+const PAUSE_FRAMES_SPLIT: usize = 2;
+
+fn frame_is_silent(frame: &Tensor) -> bool {
+    frame
+        .sqr()
+        .and_then(|t| t.mean_all())
+        .and_then(|t| t.to_scalar::<f32>())
+        .map(|ms| ms.sqrt() < SILENT_RMS)
+        .unwrap_or(false)
+}
+
+/// Wraps a chunk's frames: drops its leading silence and keeps only a short
+/// pause of its trailing silence (see `TTSModel::tighten_pauses`). Silence
+/// inside the chunk is untouched.
+fn tightened<'a>(
+    frames: Box<dyn Iterator<Item = Result<Tensor>> + 'a>,
+    chunk: &str,
+    enabled: bool,
+) -> Box<dyn Iterator<Item = Result<Tensor>> + 'a> {
+    if !enabled {
+        return frames;
+    }
+    let keep_tail = if chunk.trim_end().ends_with(['.', '!', '?', '…']) {
+        PAUSE_FRAMES_SENTENCE
+    } else {
+        PAUSE_FRAMES_SPLIT
+    };
+    let mut frames = frames;
+    let mut started = false;
+    let mut held: std::collections::VecDeque<Tensor> = std::collections::VecDeque::new();
+    let mut out: std::collections::VecDeque<Result<Tensor>> = std::collections::VecDeque::new();
+    let mut done = false;
+    Box::new(std::iter::from_fn(move || {
+        loop {
+            if let Some(f) = out.pop_front() {
+                return Some(f);
+            }
+            if done {
+                return None;
+            }
+            match frames.next() {
+                Some(Ok(frame)) => {
+                    if frame_is_silent(&frame) {
+                        if started {
+                            held.push_back(frame);
+                        }
+                    } else {
+                        started = true;
+                        out.extend(held.drain(..).map(Ok));
+                        out.push_back(Ok(frame));
+                    }
+                }
+                Some(Err(e)) => out.push_back(Err(e)),
+                None => {
+                    done = true;
+                    out.extend(held.drain(..).take(keep_tail).map(Ok));
+                }
+            }
+        }
+    }))
+}
+
 /// Converts a Python model state (`transformer.layers.N.self_attn/{cache,offset}`,
 /// cache `[2, B, T, H, D]`) into this crate's FlowLM attention state.
 fn import_model_state(
@@ -1036,5 +1110,42 @@ mod tests {
             6
         );
         assert!(resolve_config("klingon").is_err());
+    }
+}
+
+#[cfg(test)]
+mod pause_tests {
+    use super::*;
+
+    fn frame(level: f32) -> Result<Tensor> {
+        Ok(Tensor::full(level, (1, 1, 1920), &Device::Cpu)?)
+    }
+
+    fn levels(chunk: &str, input: &[f32]) -> Vec<f32> {
+        let frames: Vec<Result<Tensor>> = input.iter().map(|l| frame(*l)).collect();
+        tightened(Box::new(frames.into_iter()), chunk, true)
+            .map(|f| f.unwrap().flatten_all().unwrap().to_vec1::<f32>().unwrap()[0])
+            .collect()
+    }
+
+    /// covers: REQ-INF-003
+    #[test]
+    fn chunk_silence_is_shortened_not_speech() {
+        let input = [0.0, 0.0, 0.5, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        // leading silence dropped, the pause inside kept, 4 trailing frames
+        // after a sentence end, 2 after a comma split
+        assert_eq!(
+            levels("Fin de phrase.", &input),
+            [0.5, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0]
+        );
+        assert_eq!(
+            levels("début de phrase,", &input),
+            [0.5, 0.0, 0.5, 0.0, 0.0]
+        );
+        let frames: Vec<Result<Tensor>> = input.iter().map(|l| frame(*l)).collect();
+        assert_eq!(
+            tightened(Box::new(frames.into_iter()), "x.", false).count(),
+            input.len()
+        );
     }
 }

@@ -26,6 +26,7 @@ Without `--text`, a greeting in the model's language is spoken.
 | `--eos-threshold` | End-of-speech threshold (lower = longer) | `-4.0` |
 | `--noise-clamp` | Clamp sampling noise to ±x | off |
 | `--no-normalize`, `POCKET_TTS_NO_NORMALIZE` | Keep digits, symbols and Markdown as written (see `normalize.rs`) | normalization on |
+| `--tight-pauses true\|false`, `POCKET_TTS_TIGHT_PAUSES` | Shorten the silence between generated chunks (320 ms after a sentence, 160 ms after a comma split) | `true` |
 | `--frames-after-eos` | Frames kept after end of speech | model or length-based guess |
 | `--stream` | Raw 16-bit PCM to stdout | off |
 | `-q, --quiet` | Errors only | off |

@@ -3623,8 +3623,8 @@ dependencies = [
 
 [[package]]
 name = "tn"
-version = "0.1.0"
-source = "git+https://github.com/rzafiamy/tn-rs?tag=v0.1.0#47f3be4b0c2bbb68c02036c522762aea7f4768ad"
+version = "0.2.0"
+source = "git+https://github.com/rzafiamy/tn-rs?tag=v0.2.0#6bdad9ff91477f35cefe1d6fff30138a71a4b3be"
 dependencies = [
  "regex",
 ]

@@ -49,6 +49,7 @@ french-q8_0.gguf` (zallama) or `pocket-tts generate -m ...`.
 | REQ-VOI-002 | A WAV file clones a voice (Mimi encoder, end-on-pause trimming, `bos_before_voice`). | Should |
 | REQ-INF-001 | At temperature 0 the output matches the Python reference: same length, correlation ≥ 0.999 on short prompts. | Must |
 | REQ-INF-002 | Generation streams audio frame by frame and stops on EOS like upstream (EOS ignored for 6 frames, same tail). | Must |
+| REQ-INF-003 | Silence between generated chunks is shortened (sentence end 320 ms, comma split 160 ms; leading silence dropped, speech and inner pauses untouched); upstream behavior available with `--tight-pauses false`. | Should |
 | REQ-GGF-001 | `convert` writes one GGUF holding weights, config, tokenizer and voices; `--model` needs no other file. | Must |
 | REQ-GGF-002 | An f32 GGUF reproduces the safetensors model. | Must |
 | REQ-GGF-003 | Quantized GGUF (q8_0, q4k) linear layers run quantized; q8_0 is < 180 MB. | Must |

@@ -51,6 +51,12 @@ pub struct ModelArgs {
     /// before synthesis (French and English rules; on by default)
     #[arg(long, env = "POCKET_TTS_NO_NORMALIZE")]
     pub no_normalize: bool,
+
+    /// Shorten the silence between generated chunks (320 ms after a sentence,
+    /// 160 ms after a comma split) instead of the model's full end-of-utterance
+    /// pause, which makes long sentences sound choppy; `false` keeps upstream's
+    #[arg(long, env = "POCKET_TTS_TIGHT_PAUSES", default_value_t = true, action = clap::ArgAction::Set)]
+    pub tight_pauses: bool,
 }
 
 /// Sets the CPU thread count. Call before any tensor work.
@@ -100,6 +106,7 @@ impl ModelArgs {
         model.eos_threshold = self.eos_threshold;
         model.noise_clamp = self.noise_clamp;
         model.normalize_text = !self.no_normalize;
+        model.tighten_pauses = self.tight_pauses;
         Ok(model)
     }
 

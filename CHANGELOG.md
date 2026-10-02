@@ -6,6 +6,17 @@ versions: [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `--tight-pauses` (on by default in the CLI and server; library field
+  `tighten_pauses`, off for parity): each chunk is generated as its own
+  utterance and ended with a full end-of-sentence silence, so a long sentence
+  split at a comma had a 0.6–0.8 s pause in its middle and sounded choppy.
+  Leading silence of a chunk is dropped and its trailing silence cut to
+  320 ms after a sentence end, 160 ms after a comma split. On a 2-minute chat
+  answer: pauses ≥ 0.4 s 26 → 3, 9 s shorter.
+- tn v0.2.0: e-mails, URLs, IP addresses, French version numbers, ranges,
+  slashes, capitals and line-end pauses (see tn-rs CHANGELOG).
+
+### Added
 - Text normalization before synthesis (`normalize.rs`, on by default,
   `--no-normalize` / `POCKET_TTS_NO_NORMALIZE=1` to disable): French and
   English numbers, decimals, times, amounts, `%`, `°C`/`°F`, units, ordinals,
