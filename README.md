@@ -181,6 +181,8 @@ Requirements, traceability and manual tests: [spec/](spec/specification.md).
 
 ## Roadmap
 
+Details and context: [TODO.md](TODO.md).
+
 - Batch several requests on GPU (the GPU is launch-bound at batch 1).
 - CUDA graphs for the decode step.
 - Quality evaluation of German, Italian, Spanish, Portuguese and Dutch.
