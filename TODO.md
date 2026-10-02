@@ -18,8 +18,10 @@ Next steps after v0.7.0, in priority order. Measurements behind them:
 
 ## Integration
 
-- [ ] **zallama backend entry** for `pocket-tts serve` (TTS modality,
-  `/health`, `/v1/audio/speech`, VRAM ~680 MiB in q8_0).
+- [x] **zallama backend entry**: `pocket-tts-server` in zallama v1.24.0
+  (`build-pocket-tts.sh`, models `pocket-tts-fr` / `pocket-tts-en`, 808 MiB
+  VRAM with the 27 voices embedded).
+- [ ] Unknown `voice` returns HTTP 500; it should be a 400 (client error).
 - [ ] Publish GGUF files (english/french q8_0, q4k) with CC-BY-4.0 credit
   to Kyutai.
 
