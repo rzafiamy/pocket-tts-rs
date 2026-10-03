@@ -27,7 +27,7 @@ below, each used under its own license. Versions are those of `Cargo.lock`.
 
 | Dependency | Version | Role | License | Source |
 |---|---|---|---|---|
-| `tn` | 0.2.0 | Text normalization before synthesis | MIT | https://github.com/rzafiamy/tn-rs |
+| `tn` | 0.3.0 | Text normalization before synthesis | MIT | https://github.com/rzafiamy/tn-rs |
 | `candle-core` | 0.11.0 | Tensors, quantized matmul (CPU/CUDA/Metal), GGUF read/write | MIT OR Apache-2.0 | https://github.com/huggingface/candle |
 | `candle-nn` | 0.11.0 | Layers, softmax, VarBuilder | MIT OR Apache-2.0 | https://github.com/huggingface/candle |
 | `tokenizers` | 0.21.4 | SentencePiece / `tokenizer.json` | Apache-2.0 | https://github.com/huggingface/tokenizers |

@@ -39,7 +39,7 @@ hf-hub.workspace = true
 memmap2.workspace = true
 tokenizers = { workspace = true, features = ["onig", "progressbar", "http"] }
 intel-mkl-src = { workspace = true, optional = true }
-tn = { git = "https://github.com/rzafiamy/tn-rs", tag = "v0.2.0" }
+tn = { git = "https://github.com/rzafiamy/tn-rs", tag = "v0.3.0" }
 
 [[bench]]
 name = "streaming_bench"

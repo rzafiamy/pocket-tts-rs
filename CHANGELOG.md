@@ -15,6 +15,8 @@ versions: [SemVer](https://semver.org/).
   answer: pauses ≥ 0.4 s 26 → 3, 9 s shorter.
 - tn v0.2.0: e-mails, URLs, IP addresses, French version numbers, ranges,
   slashes, capitals and line-end pauses (see tn-rs CHANGELOG).
+- tn v0.3.0: Roman numerals in context (`Louis XIV`, `XVIIe siècle`,
+  `chapitre IV`), signs before numbers (`(+20 %)`), French `HT`/`TTC`.
 
 ### Added
 - Text normalization before synthesis (`normalize.rs`, on by default,
